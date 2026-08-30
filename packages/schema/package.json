@@ -1,0 +1,20 @@
+{
+  "name": "@ruood/announcement-schema",
+  "version": "0.1.0",
+  "description": "The announcement data contract: types, validation rules, id rules and semantic-version comparison. Zero runtime dependencies — consumed by the Announcement Manager (Node) and by RUOOD Lab (React Native).",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "dependencies": {},
+  "sideEffects": false
+}

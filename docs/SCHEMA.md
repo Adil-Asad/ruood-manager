@@ -1,0 +1,222 @@
+# Schema reference — v1
+
+The published manifest, field by field. Types are in
+`packages/schema/src/types.ts`; the rules enforcing them are in
+`validate-record.ts` and `validate-manifest.ts`.
+
+## The manifest
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "revision": 47,
+  "generatedAt": "2026-08-30T14:02:11Z",
+  "paused": false,
+  "announcements": [ /* ... */ ]
+}
+```
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `schemaVersion` | integer | Bumped only for a breaking structural change. A client above/below its range refuses the file whole. |
+| `revision` | integer ≥ 1 | Monotonic, set by the build. For logs and support, never for client logic — `ETag` does that job. |
+| `generatedAt` | instant | ISO-8601 with an explicit offset. |
+| `paused` | boolean | Global kill switch. `true` and clients show nothing. A **missing** value reads as `false`. |
+| `announcements` | array | At most 50. Whole file at most 256 KB. |
+
+## A record
+
+```jsonc
+{
+  "id": "reports-center-launch",
+  "rev": 2,
+  "minSchema": 1,
+
+  "title": "Reports Center",
+  "body": "Eight new library reports are now available under Tools.",
+  "category": "feature",
+  "priority": 50,
+
+  "startAt": "2026-09-01T06:00:00Z",
+  "endAt": "2026-09-10T20:59:00Z",
+  "paused": false,
+
+  "display": {
+    "surface": "modal",
+    "trigger": "next-launch",
+    "maxImpressions": 3,
+    "minIntervalHours": 24,
+    "dismiss": "permanent"
+  },
+
+  "targeting": {
+    "platforms": ["android", "ios"],
+    "minVersion": "2.4.0",
+    "maxVersion": null
+  },
+
+  "image": {
+    "path": "images/reports-center-a3f91c22.webp",
+    "width": 1080, "height": 608,
+    "bytes": 41203,
+    "sha256": "a3f9...",
+    "alt": "The Reports Center screen"
+  },
+
+  "action": { "type": "route", "label": "Open Reports", "target": "tools.reports" },
+
+  "signature": null
+}
+```
+
+### Identity
+
+| Field | Rule |
+| --- | --- |
+| `id` | `^[a-z0-9]+(-[a-z0-9]+)*$`, 3–64 chars. Immutable. **Never reused, including after deletion.** |
+| `rev` | Integer ≥ 1. **Bumping it resets impression counters on every device.** Leave it alone to correct a typo quietly; bump it to re-show a corrected message. |
+| `minSchema` | Integer ≥ 1. A client skips a record above its support and reads the rest of the file. |
+
+### Content
+
+| Field | Rule |
+| --- | --- |
+| `title` | 1–60 chars, single line. |
+| `body` | 1–500 chars. Newlines allowed (paragraph breaks are preserved). Warning above 300 — it will scroll on a phone. |
+| `category` | `feature` \| `fix` \| `notice` \| `tip` |
+| `priority` | 0–100. Ordering among simultaneously eligible records. **Not urgency.** |
+
+Both strings refuse control characters, U+2028/U+2029 and `<` `>`, so stored
+text can never read as markup.
+
+### Scheduling
+
+| Field | Rule |
+| --- | --- |
+| `startAt` | Instant with an explicit offset. Required. |
+| `endAt` | Instant, or `null` for no expiry. Must be **later** than `startAt`. |
+| `paused` | Optional boolean. Published but suppressed; reversible without touching the dates. |
+
+The window is half-open, `[startAt, endAt)`, so a record ending at T and one
+starting at T are never both live.
+
+Authoring-only judgements: an `endAt` already in the past is an error for a
+live record (it would show to nobody); no end date is a warning; a start more
+than 90 days out is a warning.
+
+### `display`
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `surface` | `modal` | Blocking dialog. One per session, priority-ordered. |
+| | `banner` | Inline notice on a list screen. Never blocks. |
+| | `inbox` | Settings → Announcements only. Never presented. |
+| `trigger` | `next-launch` | Shown next time the app opens. **The default.** Never interrupts work in progress. |
+| | `immediate` | May be shown during the session it was fetched in. |
+| `maxImpressions` | integer ≥ 1, or `null` | Total times it may ever be shown on one device. |
+| `minIntervalHours` | integer ≥ 0 | `0` = may repeat in a session; `24` = once a day. |
+| `dismiss` | `permanent` \| `session` \| `snooze-24h` \| `none` | What dismissing means. |
+
+`none` never means "cannot be closed". The validator **rejects** a `modal` with
+`dismiss: 'none'`, `maxImpressions: null` and `endAt: null` — that combination
+is a remote brick.
+
+The old option list maps on:
+
+| Wanted | Expressed as |
+| --- | --- |
+| Show once | `maxImpressions: 1` |
+| Show N times | `maxImpressions: N` |
+| Once per day | `minIntervalHours: 24` |
+| Once per session | `minIntervalHours: 0` + the one-modal-per-session rule |
+| Until dismissed | `maxImpressions: null`, `dismiss: 'permanent'` |
+| While active | `maxImpressions: null`, `dismiss: 'none'` (+ an end date) |
+
+### `targeting`
+
+| Field | Rule |
+| --- | --- |
+| `platforms` | Non-empty subset of `android`, `ios`, `web`. |
+| `minVersion` | Semver, **inclusive** (`>=`), or `null`. |
+| `maxVersion` | Semver, **exclusive** (`<`), or `null`. |
+
+"Every 2.5.x" is `min 2.5.0 / max 2.6.0`. A range nothing can satisfy —
+transposed or equal bounds — is an error.
+
+Targeting fails closed: an unreadable app version or bound means the record is
+not shown.
+
+Region, language, device capability and user segment are **deliberately absent**.
+RUOOD Lab has no accounts and no backend, so there is no identity to segment on
+and no way to resolve a region without adding a network call to an offline-first
+app.
+
+### `image` (optional)
+
+| Field | Rule |
+| --- | --- |
+| `path` | `images/<slug>-<8 hex>.webp`. Content-addressed. |
+| `width`, `height` | 16–1080. |
+| `bytes` | ≤ 150 KB at publish. |
+| `sha256` | 64 lowercase hex characters. |
+| `alt` | 1–120 chars. |
+
+Content addressing means an image is never mutated, only replaced — which
+answers cache invalidation and old-image cleanup at once.
+
+An image is **always optional at display time**: a failed, oversized or
+unverifiable download shows the announcement without it, never suppresses it.
+
+### `action` (optional)
+
+```jsonc
+{ "type": "route",    "label": "Open Reports",  "target": "tools.reports" }
+{ "type": "external", "label": "Release notes", "target": "https://github.com/..." }
+```
+
+`label` is 1–24 chars.
+
+A **route** target must be one of `ROUTE_TARGETS` (see
+`packages/schema/src/routes.ts`) — a closed list of screens, never a URL or a
+deep link. Nothing destructive is on it, and nothing destructive should be
+added: an announcement points at a place, never at an operation.
+
+An **external** target must be `https:`, carry no embedded credentials, and be
+on the host allowlist. `https://github.com@evil.example` is refused — it reads
+as GitHub to a human and resolves elsewhere.
+
+### `signature`
+
+`null` in v1. Reserved for Ed25519 over the canonical JSON in Phase 3.
+
+## Authored-only fields
+
+Present in `content/`, never emitted into `dist/`:
+
+| Field | Notes |
+| --- | --- |
+| `status` | `draft` \| `published` \| `paused` \| `archived`. **Stored states only.** |
+| `createdAt`, `updatedAt` | Required instants. |
+| `publishedAt`, `archivedAt` | Optional instants. |
+| `internalNote` | Operator-only. Never published. |
+
+`scheduled`, `active` and `expired` are **derived** from the dates by
+`deriveLifecycleStatus`, never stored — a stored copy would disagree with the
+dates the moment one was edited. Same rule as `usedInFormulas` in RUOOD Lab.
+
+## Validation summary
+
+**Errors** block publishing. **Warnings** proceed after confirmation.
+
+| Warning | Meaning |
+| --- | --- |
+| `unknown-field` | Probably a typo. Tolerated for forward compatibility. |
+| `text-long-warning` | Body over 300 chars; it will scroll. |
+| `no-end-date-warning` | Runs until paused or unpublished. |
+| `start-far-future-warning` | Starts more than 90 days out. |
+| `version-missing-warning` | A `feature` announcement with no version floor will reach installs too old to have the feature. |
+| `inbox-with-immediate-trigger` | An inbox record is never presented, so its trigger has no effect. |
+| `overlapping-category-warning` | Two same-category records overlap in time. |
+| `too-many-modals-warning` | More than 3 modals live at once; at one per session the last may wait days. |
+
+Full issue-code list: `packages/schema/src/issues.ts`.

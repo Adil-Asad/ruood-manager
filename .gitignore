@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+.DS_Store
+Thumbs.db
+
+# The announcements repository is cloned here by the Manager (Phase 1).
+# It is a separate git repository and must never be committed into this one.
+workspace/
