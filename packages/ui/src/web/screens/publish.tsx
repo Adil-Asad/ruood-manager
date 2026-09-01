@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api } from '../api';
-import type { ManagerState, PublishDiff, PublishResponse } from '../../shared/api';
+import type { Channel, ManagerState, PublishDiff, PublishResponse } from '../../shared/api';
 import { useManager } from '../app';
 import { Button, Callout, Card, Dialog, Issues } from '../components/ui';
 import { formatBytes, formatSigned } from '../format';
@@ -22,6 +22,8 @@ import { formatBytes, formatSigned } from '../format';
 export function PublishScreen({ state }: { state: ManagerState }): JSX.Element {
   const { run, notify, refresh, go } = useManager();
 
+  const [channel, setChannel] = useState<Channel>('production');
+  const [sign, setSign] = useState(state.signing.keyAvailable);
   const [preview, setPreview] = useState<PublishResponse | null>(null);
   const [checking, setChecking] = useState(true);
   const [confirming, setConfirming] = useState(false);
@@ -32,13 +34,15 @@ export function PublishScreen({ state }: { state: ManagerState }): JSX.Element {
   const dryRun = useCallback(async (): Promise<void> => {
     setChecking(true);
     try {
-      setPreview(await api.publish({ dryRun: true }));
+      // Unsigned for the preview: the diff does not depend on who signs it, and
+      // touching the key to answer "what would change" is work for nothing.
+      setPreview(await api.publish({ dryRun: true, channel }));
     } catch (failure) {
       notify((failure as Error).message, 'error');
     } finally {
       setChecking(false);
     }
-  }, [notify]);
+  }, [notify, channel]);
 
   useEffect(() => {
     void dryRun();
@@ -49,6 +53,8 @@ export function PublishScreen({ state }: { state: ManagerState }): JSX.Element {
     const result = await run(() =>
       api.publish({
         dryRun: false,
+        channel,
+        sign,
         acceptWarnings,
         ...(typeof paused === 'boolean' ? { paused } : {}),
         ...(message.trim() ? { message: message.trim() } : {}),
@@ -61,7 +67,12 @@ export function PublishScreen({ state }: { state: ManagerState }): JSX.Element {
 
     switch (result.status) {
       case 'published':
-        notify(`Published ${result.commit?.slice(0, 8)} at revision ${result.diff.revisionTo}.`);
+        notify(
+          `Published ${result.commit?.slice(0, 8)} to ${result.build.channel} at revision ` +
+            `${result.diff.revisionTo}` +
+            `${result.build.signedBy ? `, signed by ${result.build.signedBy}` : ' — UNSIGNED'}.`,
+          result.build.signedBy || !state.signing.expectedKeyId ? 'ok' : 'error',
+        );
         break;
       case 'committed':
         // Not a success: the commit exists, but no install has it.
@@ -104,6 +115,8 @@ export function PublishScreen({ state }: { state: ManagerState }): JSX.Element {
         </div>
       ) : null}
 
+      <SigningNotice state={state} />
+
       <Card>
         <div className="spread">
           <div>
@@ -116,6 +129,46 @@ export function PublishScreen({ state }: { state: ManagerState }): JSX.Element {
             {checking ? 'Checking…' : 'Re-check'}
           </Button>
         </div>
+
+        <div className="row" style={{ margin: '12px 0' }}>
+          <label className="row tight" style={{ whiteSpace: 'nowrap' }}>
+            Channel
+            <select
+              style={{ width: 'auto' }}
+              value={channel}
+              onChange={(event) => setChannel(event.target.value as Channel)}
+            >
+              <option value="production">production — what every install reads</option>
+              <option value="staging">staging — dev builds, and it includes DRAFTS</option>
+            </select>
+          </label>
+
+          <label
+            className="row tight"
+            style={{ whiteSpace: 'nowrap' }}
+            title={
+              state.signing.keyAvailable
+                ? undefined
+                : `No signing key at ${state.signing.keyPath}. Run: announce keygen`
+            }
+          >
+            <input
+              type="checkbox"
+              checked={sign}
+              disabled={!state.signing.keyAvailable}
+              onChange={(event) => setSign(event.target.checked)}
+            />
+            Sign
+            {state.signing.expectedKeyId ? ` with ${state.signing.expectedKeyId}` : ''}
+          </label>
+        </div>
+
+        {channel === 'staging' ? (
+          <Callout title="Staging carries drafts">
+            This publishes drafts as well as everything production gets — that is what staging is
+            for. Only dev builds read it.
+          </Callout>
+        ) : null}
 
         {checking && !preview ? <div className="loading">Building…</div> : null}
 
@@ -337,4 +390,61 @@ function Diff({ diff }: { diff: PublishDiff }): JSX.Element {
       </div>
     </pre>
   );
+}
+
+/**
+ * What signing is doing, when it is worth saying.
+ *
+ * Silent when everything agrees, because a banner that is always there is a
+ * banner nobody reads. Loud about exactly one thing: a repository that expects
+ * a signature and a published file that does not carry the right one, which
+ * means every install is already rejecting what is up there.
+ */
+function SigningNotice({ state }: { state: ManagerState }): JSX.Element | null {
+  const { signing, published } = state;
+
+  if (signing.problem) {
+    return (
+      <Callout kind="error" title="The repository's public key is unreadable">
+        {signing.problem}
+      </Callout>
+    );
+  }
+
+  if (!signing.expectedKeyId) {
+    return (
+      <Callout title="This repository is not signed">
+        Manifests are published unsigned, so nothing stops a compromised repository or a hostile
+        network serving a different one. Create a key with{' '}
+        <code className="mono">announce keygen --repo {state.repo.root}</code>.
+      </Callout>
+    );
+  }
+
+  if (published && published.signedBy !== signing.expectedKeyId) {
+    return (
+      <Callout
+        kind="error"
+        title={
+          published.signedBy
+            ? `The published manifest is signed by ${published.signedBy}, not ${signing.expectedKeyId}`
+            : 'The published manifest carries no signature'
+        }
+      >
+        Any install that pins this repository's key is rejecting it. Publish again with signing
+        on.
+      </Callout>
+    );
+  }
+
+  if (!signing.keyAvailable) {
+    return (
+      <Callout kind="warn" title={`No signing key at ${signing.keyPath}`}>
+        This repository expects manifests signed by {signing.expectedKeyId}, and the private key
+        is not where the Manager looks. Publishing here can only produce unsigned files.
+      </Callout>
+    );
+  }
+
+  return null;
 }

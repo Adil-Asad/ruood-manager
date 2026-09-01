@@ -29,6 +29,10 @@ const MANIFEST_FIELDS = new Set([
   'generatedAt',
   'paused',
   'announcements',
+  // Both optional and both absent from an unsigned build. They are listed here
+  // so a signed manifest does not warn about its own signature.
+  'keyId',
+  'signature',
 ]);
 
 export interface ManifestValidationOptions {

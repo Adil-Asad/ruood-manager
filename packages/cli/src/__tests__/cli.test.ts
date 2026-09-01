@@ -7,8 +7,9 @@
  */
 
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import sharp from 'sharp';
 
@@ -538,6 +539,186 @@ describe('push', () => {
       expect(result.code).toBe(1);
       expect(result.err).toContain('No git remote');
       expect(result.err).toContain('intact locally');
+    });
+  });
+});
+
+describe('keygen', () => {
+  /** A key path outside the repository, which is where one is allowed to live. */
+  function keyPathFor(repo: string): string {
+    return join(tmpdir(), `ruood-cli-key-${basename(repo)}.key`);
+  }
+
+  it('creates a key, keeps the private half out of the repository', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      const keyPath = keyPathFor(repo);
+
+      try {
+        const result = await run('keygen', '--key', keyPath);
+
+        expect(result.code).toBe(0);
+        expect(result.out).toContain('key id');
+        expect(result.out).toContain('NOT RECOVERABLE');
+
+        // Private outside, public inside.
+        expect(existsSync(keyPath)).toBe(true);
+        const record = JSON.parse(
+          await readFile(join(repo, 'keys', 'announcement-signing.pub'), 'utf8'),
+        );
+        expect(record.algorithm).toBe('ed25519');
+        expect(record.keyId).toMatch(/^[0-9a-f]{8}$/);
+      } finally {
+        await rm(keyPath, { force: true });
+      }
+    });
+  });
+
+  it('refuses to put the private key inside the repository', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+
+      const result = await run('keygen', '--key', join(repo, 'keys', 'signing.key'));
+
+      expect(result.code).toBe(1);
+      expect(result.err).toContain('must never live in a repository');
+      expect(existsSync(join(repo, 'keys', 'signing.key'))).toBe(false);
+    });
+  });
+
+  it('refuses to rotate without --force, because rotating is an app release', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      const keyPath = keyPathFor(repo);
+
+      try {
+        await run('keygen', '--key', keyPath);
+        const again = await run('keygen', '--key', `${keyPath}.2`);
+
+        expect(again.code).toBe(1);
+        expect(again.err).toContain('rotation is an app release');
+      } finally {
+        await rm(keyPath, { force: true });
+        await rm(`${keyPath}.2`, { force: true });
+      }
+    });
+  });
+});
+
+describe('signing a publish', () => {
+  function keyPathFor(repo: string): string {
+    return join(tmpdir(), `ruood-cli-sign-${basename(repo)}.key`);
+  }
+
+  it('signs, verifies, and refuses once the file is touched', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      const keyPath = keyPathFor(repo);
+
+      try {
+        await run('keygen', '--key', keyPath);
+        await run('new', 'thing', '--title', 'A', '--body', 'B', '--end', '2026-12-01T00:00:00Z');
+        await run('activate', 'thing');
+
+        const published = await run('publish', '--no-push', '--accept-warnings', '--key', keyPath);
+        expect(published.code).toBe(0);
+
+        const verified = await run('verify');
+        expect(verified.code).toBe(0);
+        expect(verified.out).toContain('production  OK');
+
+        // The edit the whole mechanism exists to catch.
+        const manifestFile = join(repo, 'dist', 'announcements.json');
+        const manifest = JSON.parse(await readFile(manifestFile, 'utf8'));
+        await writeFile(manifestFile, JSON.stringify({ ...manifest, paused: true }), 'utf8');
+
+        const broken = await run('verify');
+        expect(broken.code).toBe(1);
+        expect(broken.err).toContain('has been altered');
+        expect(broken.err).toContain('republish through the Manager');
+      } finally {
+        await rm(keyPath, { force: true });
+      }
+    });
+  });
+
+  it('warns when a signed repository is about to publish unsigned', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      const keyPath = keyPathFor(repo);
+
+      try {
+        await run('keygen', '--key', keyPath);
+        await run('new', 'thing', '--title', 'A', '--body', 'B');
+        await run('activate', 'thing');
+
+        const result = await run('publish', '--dry-run');
+        expect(result.err).toContain('this build is unsigned');
+      } finally {
+        await rm(keyPath, { force: true });
+      }
+    });
+  });
+
+  it('refuses rather than publishing unsigned when the key is missing', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('new', 'thing', '--title', 'A', '--body', 'B');
+      await run('activate', 'thing');
+
+      const result = await run(
+        'publish',
+        '--no-push',
+        '--accept-warnings',
+        '--key',
+        join(tmpdir(), 'ruood-no-such-key.key'),
+      );
+
+      expect(result.code).toBe(1);
+      expect(result.err).toContain('No signing key at');
+    });
+  });
+
+  it('verify says so when nothing has been signed yet', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+
+      const result = await run('verify');
+      expect(result.code).toBe(1);
+      expect(result.err).toContain('no keys/announcement-signing.pub');
+    });
+  });
+});
+
+describe('the staging channel', () => {
+  it('publishes drafts to staging and nothing to production', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('new', 'preview-me', '--title', 'Preview', '--body', 'Not ready yet.');
+
+      const staged = await run('publish', '--channel', 'staging', '--no-push', '--accept-warnings');
+      expect(staged.code).toBe(0);
+
+      const staging = JSON.parse(
+        await readFile(join(repo, 'dist', 'staging', 'announcements.json'), 'utf8'),
+      );
+      expect(staging.announcements.map((r: { id: string }) => r.id)).toEqual(['preview-me']);
+
+      // Production is untouched: the draft is still a draft.
+      const production = JSON.parse(
+        await readFile(join(repo, 'dist', 'announcements.json'), 'utf8'),
+      );
+      expect(production.announcements).toEqual([]);
+    });
+  });
+
+  it('rejects a channel that is not one of the two', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+
+      const result = await run('publish', '--channel', 'beta', '--dry-run');
+      expect(result.code).toBe(2);
+      expect(result.err).toContain('production or staging');
     });
   });
 });

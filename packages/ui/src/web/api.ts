@@ -13,6 +13,7 @@
 
 import type {
   BuildSummary,
+  Channel,
   DeleteRecordResponse,
   GitLogEntry,
   IdCheckResponse,
@@ -118,9 +119,11 @@ export const api = {
   detachImage: (id: string): Promise<RecordDetail> =>
     request('DELETE', `/api/records/${encodeURIComponent(id)}/image`),
 
-  validate: (): Promise<BuildSummary> => request('POST', '/api/validate'),
+  validate: (channel: Channel = 'production'): Promise<BuildSummary> =>
+    request('POST', '/api/validate', { channel }),
 
-  build: (): Promise<BuildSummary> => request('POST', '/api/build'),
+  build: (channel: Channel = 'production'): Promise<BuildSummary> =>
+    request('POST', '/api/build', { channel }),
 
   publish: (input: PublishRequest): Promise<PublishResponse> =>
     request('POST', '/api/publish', input),

@@ -15,6 +15,7 @@ import { canonicalJson } from '@ruood/announcement-schema';
 
 import { AnnouncementRepo } from './git/repository';
 import { repoPaths, type RepoPaths } from './paths';
+import { CI_SCRIPT, CI_SCRIPT_FILE, CI_WORKFLOW, CI_WORKFLOW_FILE } from './ci/files';
 
 export interface ScaffoldResult {
   paths: RepoPaths;
@@ -35,7 +36,16 @@ export async function scaffoldRepository(root: string): Promise<ScaffoldResult> 
   const created: string[] = [];
   const alreadyExisted = existsSync(paths.content);
 
-  for (const dir of [paths.announcements, paths.media, paths.images, join(root, 'schema')]) {
+  for (const dir of [
+    paths.announcements,
+    paths.media,
+    paths.images,
+    join(root, 'schema'),
+    // The staging channel's output. Created up front so the layout is visible
+    // before the first staging publish rather than appearing later.
+    join(paths.dist, 'staging', 'images'),
+    join(root, 'keys'),
+  ]) {
     if (!existsSync(dir)) {
       await mkdir(dir, { recursive: true });
       created.push(dir);
@@ -47,22 +57,25 @@ export async function scaffoldRepository(root: string): Promise<ScaffoldResult> 
   await writeOnce(join(root, '.gitignore'), GITIGNORE, created);
   await writeOnce(join(root, 'README.md'), README, created);
   await writeOnce(join(paths.media, '.gitkeep'), '', created);
+  await writeOnce(join(root, 'keys', '.gitkeep'), '', created);
+
+  // CI verifies that dist/ is still what the Manager signed. Scaffolded into
+  // the repository rather than run from the Manager, because what it has to
+  // catch is a commit the Manager did not produce.
+  await writeOnce(join(root, CI_WORKFLOW_FILE), CI_WORKFLOW, created);
+  await writeOnce(join(root, CI_SCRIPT_FILE), CI_SCRIPT, created);
 
   // An empty but VALID manifest, so a client fetching before the first publish
   // gets a well-formed file rather than a 404 it has to treat as an error.
   if (!existsSync(paths.manifest)) {
-    await writeFile(
-      paths.manifest,
-      canonicalJson({
-        schemaVersion: 1,
-        revision: 0,
-        generatedAt: '1970-01-01T00:00:00Z',
-        paused: false,
-        announcements: [],
-      }),
-      'utf8',
-    );
+    await writeFile(paths.manifest, EMPTY_MANIFEST, 'utf8');
     created.push(paths.manifest);
+  }
+
+  const stagingManifest = join(paths.dist, 'staging', 'announcements.json');
+  if (!existsSync(stagingManifest)) {
+    await writeFile(stagingManifest, EMPTY_MANIFEST, 'utf8');
+    created.push(stagingManifest);
   }
 
   const repo = new AnnouncementRepo(root);
@@ -87,9 +100,33 @@ async function writeOnce(file: string, contents: string, created: string[]): Pro
   created.push(file);
 }
 
+/**
+ * A valid but empty manifest, so a client fetching before the first publish
+ * reads a well-formed file rather than a 404 it has to treat as an error.
+ *
+ * Unsigned, and correctly so: there is no key yet, and a client that requires
+ * signatures is a client that should refuse this rather than be handed a
+ * plausible-looking forgery target.
+ */
+const EMPTY_MANIFEST = canonicalJson({
+  schemaVersion: 1,
+  revision: 0,
+  generatedAt: '1970-01-01T00:00:00Z',
+  paused: false,
+  announcements: [],
+});
+
 const GITIGNORE = `node_modules/
 .DS_Store
 Thumbs.db
+
+# The PRIVATE signing key must never be committed. \`announce keygen\` refuses to
+# write one inside a repository at all, so this is the second line of defence
+# rather than the first — but a key in git history stays in git history.
+*.key
+*.pem
+keys/*.key
+keys/*.pem
 `;
 
 const README = `# RUOOD Lab Announcements
@@ -116,6 +153,22 @@ announcement is never a dependency for the app starting.
 
 \`paused: true\` at the root of that file is a kill switch: every install shows
 nothing until it goes back to \`false\`.
+
+## Signing
+
+\`dist/announcements.json\` is signed with Ed25519 over the canonical form of the
+whole file — including \`paused\`, \`revision\` and which records are present. The
+public key is in \`keys/announcement-signing.pub\` and is committed on purpose; a
+public key is public. The private key lives outside every repository.
+
+CI re-checks the signature on every push (\`.github/workflows/verify.yml\`). If it
+fails, \`dist/\` was edited by something other than the Manager.
+
+## Channels
+
+\`dist/announcements.json\` is production. \`dist/staging/announcements.json\` is
+the staging channel, which dev builds read and which additionally carries
+**drafts** — that is what it is for. Each is published by its own commit.
 
 ## Ids are permanent
 

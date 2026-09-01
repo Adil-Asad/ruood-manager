@@ -252,4 +252,21 @@ export interface AnnouncementManifest {
   /** Global kill switch. `true` and clients show nothing at all. */
   paused: boolean;
   announcements: PublishedAnnouncement[];
+
+  /**
+   * Which key signed this file: the first 8 hex of the sha256 of the public
+   * key. A hint, not a credential -- it says which of its pinned keys a client
+   * should try, and a client that does not recognise it refuses the manifest.
+   */
+  keyId?: string;
+
+  /**
+   * Ed25519 over the canonical COMPACT form of this envelope with `signature`
+   * removed. `keyId` is inside the covered bytes, so it cannot be swapped.
+   *
+   * Covers the whole file rather than each record, because the three things
+   * worth tampering with -- `paused`, `revision`, and which records are present
+   * at all -- are not inside any record. See `signing.ts`.
+   */
+  signature?: string | null;
 }

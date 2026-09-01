@@ -107,7 +107,12 @@ export function DashboardScreen({ state }: { state: ManagerState }): JSX.Element
               <Stat value={state.published.images} label="images" />
               <Stat value={formatBytes(state.published.bytes)} label="manifest size" />
             </div>
-            <p className="hint">Generated {formatInstant(state.published.generatedAt)}.</p>
+            <p className="hint">
+              Generated {formatInstant(state.published.generatedAt)}.{' '}
+              {state.published.signedBy
+                ? `Signed by ${state.published.signedBy}.`
+                : 'Unsigned.'}
+            </p>
           </>
         ) : (
           <p className="hint">
@@ -127,6 +132,13 @@ export function DashboardScreen({ state }: { state: ManagerState }): JSX.Element
           <Callout kind="warn" title={`${state.git.status.ahead} commit(s) are not pushed`}>
             They are committed locally, so nothing is half-published — but no install has them.
           </Callout>
+        ) : null}
+
+        {state.publishedStaging && state.publishedStaging.revision > 0 ? (
+          <p className="hint">
+            Staging: revision {state.publishedStaging.revision},{' '}
+            {state.publishedStaging.records} record(s) — dev builds only, and it includes drafts.
+          </p>
         ) : null}
 
         <div className="row" style={{ marginTop: 12 }}>

@@ -17,10 +17,15 @@ import type { FastifyInstance } from 'fastify';
 import {
   AnnouncementRepo,
   buildManifest,
+  defaultKeyPath,
+  isChannel,
+  loadSigningKey,
   publish,
   saveState,
   writeBuild,
   type BuildResult,
+  type Channel,
+  type SigningKey,
 } from '@ruood/announcement-core';
 
 import type { ServerContext } from '../context';
@@ -41,14 +46,24 @@ export function registerPublishRoutes(app: FastifyInstance, ctx: ServerContext):
    * `keepRevision` is why: running validate twice must not advance the number
    * that will appear in a published manifest.
    */
-  app.post('/api/validate', async (): Promise<BuildSummary> => {
-    const result = await buildManifest(ctx.paths, { now: ctx.now(), keepRevision: true });
-    return summarise(result);
-  });
+  app.post<{ Body: { channel?: Channel } }>(
+    '/api/validate',
+    async (request): Promise<BuildSummary> => {
+      const result = await buildManifest(ctx.paths, {
+        now: ctx.now(),
+        keepRevision: true,
+        channel: channelOf(request.body?.channel),
+      });
+      return summarise(result);
+    },
+  );
 
   /** Writes `dist/` without committing. */
-  app.post('/api/build', async (): Promise<BuildSummary> => {
-    const result = await buildManifest(ctx.paths, { now: ctx.now() });
+  app.post<{ Body: { channel?: Channel } }>('/api/build', async (request): Promise<BuildSummary> => {
+    const result = await buildManifest(ctx.paths, {
+      now: ctx.now(),
+      channel: channelOf(request.body?.channel),
+    });
 
     if (!result.ok) {
       // Same refusal the CLI makes, and for the same reason: a build that
@@ -68,10 +83,18 @@ export function registerPublishRoutes(app: FastifyInstance, ctx: ServerContext):
     // Defaulting to a dry run is deliberate. A malformed request should never
     // be the one that commits and pushes.
     const dryRun = body.dryRun !== false;
+    const channel = channelOf(body.channel);
+
+    // Asked to sign and unable to is a REFUSAL, never a silent unsigned
+    // publish: that would succeed, look fine, and ship a file no install
+    // accepts — with no feedback channel to ever say so.
+    const signingKey = body.sign ? await requireSigningKey() : undefined;
 
     const result = await publish(ctx.paths, {
       now: ctx.now(),
       dryRun,
+      channel,
+      ...(signingKey ? { signingKey } : {}),
       ...(body.acceptWarnings ? { acceptWarnings: true } : {}),
       ...(body.noPush ? { noPush: true } : {}),
       // Omitted means "leave it as it is": the kill switch is sticky, and an
@@ -136,6 +159,22 @@ export function registerPublishRoutes(app: FastifyInstance, ctx: ServerContext):
   });
 }
 
+function channelOf(value: unknown): Channel {
+  if (value === undefined) return 'production';
+  if (!isChannel(value)) {
+    throw new RequestError(400, `Unknown channel "${String(value)}".`);
+  }
+  return value;
+}
+
+async function requireSigningKey(): Promise<SigningKey> {
+  try {
+    return await loadSigningKey(defaultKeyPath());
+  } catch (error) {
+    throw new RequestError(409, (error as Error).message);
+  }
+}
+
 async function usableRepo(ctx: ServerContext): Promise<AnnouncementRepo> {
   const repo = new AnnouncementRepo(ctx.root);
   if (!(await repo.isRepository())) {
@@ -153,6 +192,8 @@ async function usableRepo(ctx: ServerContext): Promise<AnnouncementRepo> {
 function summarise(result: BuildResult): BuildSummary {
   return {
     ok: result.ok,
+    channel: result.channel,
+    signedBy: result.signedBy,
     revision: result.manifest.revision,
     bytes: result.bytes,
     records: result.manifest.announcements.length,

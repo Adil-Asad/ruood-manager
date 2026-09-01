@@ -45,8 +45,8 @@ Three rules the design exists to hold:
 | **0** | Schema, validator, id rules, version comparison | **Complete** |
 | **1** | CLI + core: build, image pipeline, git publish, diff, revert | **Complete** |
 | **2** | Manager UI (Vite + React over `core`) | **Complete** |
-| 3 | Hardening: Ed25519 signing, staging channel, CI validation | **Next** |
-| 4 | RUOOD Lab integration: fetcher, eligibility, local state, presenter | Not started |
+| **3** | Hardening: Ed25519 signing, staging channel, CI validation | **Complete** |
+| 4 | RUOOD Lab integration: fetcher, eligibility, local state, presenter | **Next** |
 | 5 | In-app announcement inbox | Not started |
 
 Nothing in RUOOD Lab has been modified, and nothing will be until Phase 4.
@@ -78,6 +78,11 @@ npm test --workspace @ruood/announcement-schema
 
 # the Manager UI, against an announcements repository
 npm run ui -- --repo workspace/demo        # then open http://127.0.0.1:4874
+
+# signing, once per announcements repository
+npm run announce -- keygen --repo <path>
+npm run announce -- publish --repo <path> --sign
+npm run announce -- verify --repo <path>
 ```
 
 The UI is a second front end over the same `core` functions the CLI calls, so
@@ -90,7 +95,7 @@ A full check before calling work done:
 npm run typecheck && npm test && npm run build
 ```
 
-Currently **489 tests across 15 suites** — 279 schema, 127 core, 34 cli, 49 ui.
+Currently **557 tests across 17 suites** — 306 schema, 159 core, 43 cli, 49 ui.
 
 ## Reading order
 

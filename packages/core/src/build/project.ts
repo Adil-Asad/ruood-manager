@@ -35,6 +35,18 @@ export interface ProjectionOptions {
   revision: number;
   /** The global kill switch. */
   paused?: boolean;
+  /**
+   * Include drafts. True only for the staging channel.
+   *
+   * This is the whole point of staging: seeing an announcement on a real device
+   * before deciding it is ready. A staging manifest that excluded drafts the
+   * way production does would be a copy of production and worth nothing.
+   *
+   * Archived and expired records stay excluded from both. Neither is something
+   * you are trying to preview — one is deliberately retired and the other can
+   * never be shown again.
+   */
+  includeDrafts?: boolean;
 }
 
 export interface ProjectionResult {
@@ -66,7 +78,7 @@ export function projectManifest(
   const excluded: ExcludedRecord[] = [];
 
   for (const record of records) {
-    const reason = exclusionFor(record, options.now);
+    const reason = exclusionFor(record, options.now, options.includeDrafts);
     if (reason) {
       excluded.push({ id: record.id, reason });
       continue;
@@ -99,8 +111,9 @@ export function projectManifest(
 export function exclusionFor(
   record: AuthoredAnnouncement,
   now: number,
+  includeDrafts = false,
 ): ExclusionReason | null {
-  if (record.status === 'draft') return 'draft';
+  if (record.status === 'draft' && !includeDrafts) return 'draft';
   if (record.status === 'archived') return 'archived';
 
   const start = instantToEpoch(record.startAt);

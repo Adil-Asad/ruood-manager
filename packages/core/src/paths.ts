@@ -76,3 +76,65 @@ export function imageName(id: string, sha256: string): string {
 export function imageManifestPath(id: string, sha256: string): string {
   return `images/${imageName(id, sha256)}`;
 }
+
+/**
+ * The two publication channels.
+ *
+ * `staging` is a second manifest in the SAME repository, published by its own
+ * commit to `dist/staging/`. A dev or TestFlight build is compiled with the
+ * staging URL and sees it; a store build never does.
+ *
+ * Same repository rather than a branch or a second repo, because everything
+ * that makes publishing safe here comes from there being one working copy: one
+ * remote, one set of credentials, one `git log` that is the whole publication
+ * history, and one `content/` that both channels project from.
+ */
+export const CHANNELS = ['production', 'staging'] as const;
+export type Channel = (typeof CHANNELS)[number];
+
+export function isChannel(value: unknown): value is Channel {
+  return typeof value === 'string' && (CHANNELS as readonly string[]).includes(value);
+}
+
+export interface ChannelPaths {
+  channel: Channel;
+  dist: string;
+  manifest: string;
+  images: string;
+  /**
+   * What a publish to this channel stages, relative to the repository root.
+   *
+   * Explicit, and per-channel, for the same reason `commitPaths` takes paths
+   * rather than `add -A`: staging the whole of `dist/` would make a production
+   * publish sweep up whatever staging happened to have written, and the two are
+   * meant to be able to differ.
+   *
+   * `keys/` is in both. It holds only the PUBLIC key record, and a signed
+   * manifest whose public key was never committed is one CI cannot check and a
+   * reader cannot trace — so it travels with the first publish rather than
+   * waiting for someone to remember.
+   */
+  commitPaths: string[];
+}
+
+export function channelPaths(paths: RepoPaths, channel: Channel = 'production'): ChannelPaths {
+  if (channel === 'staging') {
+    const dist = join(paths.dist, 'staging');
+    return {
+      channel,
+      dist,
+      manifest: join(dist, 'announcements.json'),
+      images: join(dist, 'images'),
+      commitPaths: ['dist/staging', 'content', 'keys'],
+    };
+  }
+
+  return {
+    channel,
+    dist: paths.dist,
+    manifest: paths.manifest,
+    images: paths.images,
+    // Named individually rather than as `dist`, so `dist/staging` is untouched.
+    commitPaths: ['dist/announcements.json', 'dist/images', 'content', 'keys'],
+  };
+}

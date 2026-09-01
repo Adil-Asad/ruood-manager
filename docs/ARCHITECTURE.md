@@ -193,10 +193,10 @@ which requires a backend:
    that is never dismissed, never limited and never expires — that would be a
    remote brick.
 
-`signature` is reserved in v1 and implemented in Phase 3 (Ed25519 over the
-canonical JSON, public key in the app binary). Reserving a nullable field now
-costs one line; adding one to a schema already on devices costs a version bump
-and a migration.
+`signature` was reserved per-record in v1 and Phase 3 implemented signing at the
+**manifest** level instead — see *Signing* below for why the per-record field
+would have left the kill switch, the revision and the record set unprotected. It
+remains reserved and unused.
 
 The manifest URL is compiled into the app. The manifest must never be able to
 tell the client where to fetch next time.
@@ -220,6 +220,129 @@ overlapping options became `maxImpressions`, `minIntervalHours` and `dismiss`.
 
 `surface` is the axis that was missing. Without it every announcement is a
 blocking modal, and the practical result is that you stop sending them.
+
+## Signing (Phase 3)
+
+The practical threat has always been one bad file. Four mitigations answered it
+without a backend; signing is the fifth, and it is the one that makes the other
+four hold even if the repository or the Pages domain is taken.
+
+### Why the manifest, not each record
+
+v1 reserved a per-record `signature`. Implementing it there would have been
+faithful to the reservation and close to useless, because the three most
+valuable things to tamper with are not inside any record:
+
+| Target | Consequence of leaving it unsigned |
+| --- | --- |
+| `paused` | the kill switch, flipped either way, for every install at once |
+| `revision` | an old manifest replayed as the current one |
+| the record set | an announcement deleted without forging anything |
+
+So the signature is over the envelope: `keyId` and `signature` at the manifest
+root, covering every record inside it as well as all three of the above. The
+per-record field stays reserved and unused.
+
+Adding two optional fields to the envelope was free precisely because no client
+had shipped. That was the whole reason `signature` was reserved in v1 — to avoid
+changing a schema already on devices — and Phase 4 has not happened, so the cost
+the reservation was insuring against does not exist yet.
+
+### What the bytes are
+
+`manifestSigningInput`: the canonical **compact** form of the envelope with
+`signature` removed.
+
+- **Compact**, because the published file is pretty-printed so it diffs like
+  source. A signature that broke on reformatting could not be verified twice.
+- **`keyId` included**, so it cannot be relabelled to point at another key.
+- **Unknown fields included**, so adding one changes the covered bytes and the
+  signature stops verifying. Tolerating unknown fields is a rule about what a
+  client may still *read*; it was never a licence to leave them unauthenticated.
+
+### Where the crypto lives, and where it does not
+
+`@ruood/announcement-schema` defines what is signed and what a verdict means,
+and carries **no crypto at all** — the isolation sweep bans `node:crypto`
+alongside `fs` and `Buffer`. The Ed25519 is injected: `node:crypto` in the
+Manager, a Hermes-compatible implementation in RUŌOD Lab in Phase 4.
+
+Two implementations of the algorithm, one definition of the covered bytes. That
+split is deliberate: an algorithm mismatch fails loudly on every file, while a
+mismatch about *what is covered* would be nearly impossible to diagnose.
+
+### Failing closed, and rolling out
+
+A signature that does not verify refuses the **whole file**, before any record
+is read. No "unknown key, so show it anyway", no salvaging records from a file
+that failed — either would make pinning decorative.
+
+Checking is opt-in on the client having both keys and a verifier, and
+`requireSignature` is a third, separate switch. The two roll out at different
+times: a build can start checking signatures before every published file has
+one, and only later start requiring them. Requiring a signature a build cannot
+check is a misconfiguration, and it fails closed.
+
+### The key
+
+Ed25519. The private half lives outside every repository — `saveSigningKey`
+refuses a path inside one by path containment, not by trusting a `.gitignore`,
+because the failure being prevented is exactly the missing ignore rule. The
+public half is committed, and a publish stages `keys/` so it travels with the
+first signed manifest.
+
+`keyId` is the first 8 hex of the sha256 of the raw public key: derived, so it
+is a fact about the key rather than a label to keep in step. It is a hint about
+which pinned key to try, never a credential — an unrecognised one refuses the
+file rather than causing keys to be tried in turn.
+
+**Rotation is an app release.** The public key is compiled into the binary, so a
+new key means every install on the old build rejects everything until it
+updates. `keygen` refuses to overwrite without `--force`, and the private key is
+not recoverable.
+
+## The staging channel
+
+`dist/staging/announcements.json` in the same repository, read by dev and
+TestFlight builds. Considered and rejected: a `staging` branch (two histories to
+keep in step, and rollback spans both) and a second repository (two remotes, two
+Pages sites, `content/` duplicated or synced).
+
+Staging carries **drafts** as well as everything production gets. That is the
+entire point — previewing an announcement on a real device before deciding it is
+ready — and a staging manifest that excluded drafts would be a copy of
+production. Archived and expired records stay out of both: one is deliberately
+retired, the other can never be shown again.
+
+**One publish is one channel, so it is one commit.** Each is still atomic, each
+gets its own `git log` line naming the channel, and reverting staging does not
+revert production. A single commit touching both would have made "roll back
+staging" mean rolling back production too.
+
+## CI: verification, not revalidation
+
+`scripts/verify-manifest.mjs` and its workflow are scaffolded into the
+announcements repository, because what CI has to catch is a commit the Manager
+did not produce — a hand edit, a force-push, a fix applied straight on GitHub.
+
+It does not re-run the validator. Every field rule was already enforced at
+publish time by `verifyPublishable`, which runs the client's own parser over the
+exact bytes; repeating that in CI would need a copy of the validator, and a copy
+drifts. So CI asks the one question publish time cannot answer: **is this still
+the file that was signed?** The envelope signature answers it completely, and
+the image hashes inside that now-authentic manifest extend the answer to the
+bytes beside it.
+
+The script has zero dependencies and no secrets, so nothing sits between a push
+and the check. It carries its own `canonicalCompactJson`, which is a deliberate
+second implementation: if it ever drifts, CI fails on every correctly signed
+manifest — loud and immediate, never quietly permissive.
+
+Revision 0 is the scaffolded placeholder that exists so a client fetching before
+the first publish reads a well-formed file rather than a 404. It predates the
+key and is skipped. A build always increments, so nothing else can be 0. A
+manifest that *is* signed while the public key is missing fails rather than
+skipping — deleting the key file must not be a way to pass.
 
 ## The Manager UI
 

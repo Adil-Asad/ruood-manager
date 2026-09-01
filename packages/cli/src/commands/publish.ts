@@ -2,7 +2,7 @@ import { formatDiff, publish } from '@ruood/announcement-core';
 
 import { flagBool, flagString } from '../args';
 import type { CommandContext, CommandResult } from '../main';
-import { paths, reportIssues } from './shared';
+import { channelOf, paths, reportIssues, signingKeyFor } from './shared';
 
 export async function runPublish(ctx: CommandContext): Promise<CommandResult> {
   const wantPause = flagBool(ctx.args, 'pause');
@@ -13,8 +13,16 @@ export async function runPublish(ctx: CommandContext): Promise<CommandResult> {
     return 2;
   }
 
+  const channel = channelOf(ctx);
+  if (!channel) return 2;
+
+  const signingKey = await signingKeyFor(ctx);
+  if (signingKey === null) return 1;
+
   const result = await publish(paths(ctx), {
     now: ctx.now,
+    channel,
+    ...(signingKey ? { signingKey } : {}),
     dryRun: flagBool(ctx.args, 'dry-run'),
     noPush: flagBool(ctx.args, 'no-push'),
     acceptWarnings: flagBool(ctx.args, 'accept-warnings'),
@@ -70,7 +78,11 @@ export async function runPublish(ctx: CommandContext): Promise<CommandResult> {
 
     case 'published':
       ctx.out('');
-      ctx.out(`Published ${result.commit?.slice(0, 8)} at revision ${result.diff.revisionTo}.`);
+      ctx.out(
+        `Published ${result.commit?.slice(0, 8)} to ${result.build.channel} at revision ` +
+          `${result.diff.revisionTo}` +
+          `${result.build.signedBy ? `, signed by ${result.build.signedBy}` : ''}.`,
+      );
       ctx.out(
         'Clients pick it up on their next check — at most one fetch every 6 hours per install.',
       );

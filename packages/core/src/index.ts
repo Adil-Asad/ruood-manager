@@ -23,6 +23,10 @@ export * from './build/build';
 
 export * from './images/encode';
 export * from './images/attach';
+export * from './ci/files';
+
+export * from './signing/keys';
+export * from './signing/sign';
 
 export * from './publish/diff';
 export * from './publish/publish';

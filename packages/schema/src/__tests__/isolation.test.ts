@@ -83,6 +83,11 @@ describe('the package is platform-neutral', () => {
     'node:path',
     'fs',
     'path',
+    // Signing is the standing temptation: `signing.ts` defines WHAT is signed
+    // and delegates the Ed25519 itself to the consumer, precisely so that this
+    // package keeps running inside a Hermes bundle that has no node:crypto.
+    'node:crypto',
+    'crypto',
   ])('never imports %s in production code', (banned) => {
     const offenders = productionFiles.filter((file) =>
       importsOf(file).some(

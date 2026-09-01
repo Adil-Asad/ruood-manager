@@ -3,11 +3,17 @@
  */
 
 import {
+  defaultKeyPath,
+  isChannel,
   loadContent,
+  loadPublicKeyRecord,
+  loadSigningKey,
   repoPaths,
   saveRecord,
+  type Channel,
   type ContentSnapshot,
   type RepoPaths,
+  type SigningKey,
 } from '@ruood/announcement-core';
 import {
   deriveLifecycleStatus,
@@ -16,6 +22,7 @@ import {
   type ValidationIssue,
 } from '@ruood/announcement-schema';
 
+import { flagBool, flagString } from '../args';
 import type { CommandContext } from '../main';
 
 export function paths(ctx: CommandContext): RepoPaths {
@@ -110,4 +117,58 @@ export function table(rows: readonly string[][]): string {
         .trimEnd(),
     )
     .join('\n');
+}
+
+/**
+ * The channel a command is acting on. `production` unless asked otherwise.
+ *
+ * Defaulting to production rather than requiring the flag every time is a
+ * deliberate asymmetry: the common operation should be the short one, and
+ * publishing to staging by accident is harmless while the reverse is not.
+ */
+export function channelOf(ctx: CommandContext): Channel | null {
+  const requested = flagString(ctx.args, 'channel');
+  if (requested === null) return 'production';
+
+  if (!isChannel(requested)) {
+    ctx.err(`--channel must be production or staging, not "${requested}".`);
+    return null;
+  }
+
+  return requested;
+}
+
+/**
+ * The signing key, when `--sign` was asked for.
+ *
+ * Returns `undefined` for "not signing", and `null` for "asked to sign and
+ * could not" — which the caller must treat as a refusal. Publishing unsigned
+ * after being asked to sign would be the worst possible reading of a missing
+ * key file: it succeeds, looks fine, and ships something no install trusts.
+ */
+export async function signingKeyFor(
+  ctx: CommandContext,
+): Promise<SigningKey | undefined | null> {
+  const explicitPath = flagString(ctx.args, 'key');
+  const asked = flagBool(ctx.args, 'sign') || explicitPath !== null;
+
+  if (!asked) {
+    // Not asked, but say so when the repository plainly expects it — an
+    // unsigned publish to a signed repository is a mistake, not a choice.
+    const expected = await loadPublicKeyRecord(ctx.repoRoot);
+    if (expected) {
+      ctx.err(
+        `Note: this repository expects manifests signed by key ${expected.keyId}, and this ` +
+          'build is unsigned. Add --sign.',
+      );
+    }
+    return undefined;
+  }
+
+  try {
+    return await loadSigningKey(explicitPath ?? defaultKeyPath());
+  } catch (error) {
+    ctx.err((error as Error).message);
+    return null;
+  }
 }

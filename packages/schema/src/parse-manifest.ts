@@ -26,6 +26,11 @@
  */
 
 import { MANIFEST_MAX_BYTES, SUPPORTED_SCHEMA_VERSION } from './constants';
+import {
+  verifyManifestSignature,
+  type SignatureVerifier,
+  type TrustedKey,
+} from './signing';
 import type { AnnouncementManifest, PublishedAnnouncement } from './types';
 import { validateManifest } from './validate-manifest';
 import { isPlainObject, validateAnnouncementRecord } from './validate-record';
@@ -36,7 +41,15 @@ export type ManifestRejection =
   | 'not-an-object'
   | 'schema-too-new'
   | 'schema-too-old'
-  | 'malformed-envelope';
+  | 'malformed-envelope'
+  /**
+   * The whole file is refused, not degraded.
+   *
+   * A signature that does not verify is the exact case the mechanism exists
+   * for; falling back to "show it unsigned" would make pinning decorative.
+   */
+  | 'signature-required'
+  | 'signature-invalid';
 
 export interface ParsedManifest {
   ok: true;
@@ -96,6 +109,29 @@ export interface ParseOptions {
    * oversized file is rejected before it is parsed into memory.
    */
   receivedBytes?: number;
+
+  /**
+   * Public keys this build was shipped with. Signature checking happens only
+   * when both this and `verifySignature` are supplied.
+   */
+  trustedKeys?: readonly TrustedKey[];
+
+  /**
+   * The Ed25519 implementation. Injected because this package is
+   * platform-neutral and carries no crypto of its own -- `node:crypto` in the
+   * Manager, a Hermes-compatible one in RUOOD Lab.
+   */
+  verifySignature?: SignatureVerifier;
+
+  /**
+   * Refuse a manifest that carries no signature at all.
+   *
+   * Separate from having keys, because the two roll out at different times: a
+   * build can start *checking* signatures before every published file has one,
+   * and only then start *requiring* them. Turning this on before the publisher
+   * signs would reject every good file.
+   */
+  requireSignature?: boolean;
 }
 
 /** Parses raw response text. Never throws. */
@@ -166,6 +202,11 @@ export function parseManifest(value: unknown, options: ParseOptions): ParseManif
     };
   }
 
+  // Signature first, before a single record is read. A file that does not
+  // verify is not a file to salvage records from.
+  const signatureCheck = checkSignature(envelope, options);
+  if (signatureCheck) return signatureCheck;
+
   // A missing `paused` reads as false rather than rejecting the file: a kill
   // switch that fails to the "everything is suppressed" side would be worse.
   const paused = envelope.paused === true;
@@ -208,9 +249,60 @@ export function parseManifest(value: unknown, options: ParseOptions): ParseManif
       generatedAt: envelope.generatedAt,
       paused,
       announcements: accepted,
+      ...(typeof envelope.keyId === 'string' ? { keyId: envelope.keyId } : {}),
+      ...(typeof envelope.signature === 'string' ? { signature: envelope.signature } : {}),
     },
     skipped,
   };
+}
+
+/**
+ * The signature gate: `null` to continue, or the rejection to return.
+ *
+ * Checking is opt-in on having both keys and a verifier, so a build with
+ * neither behaves exactly as it did before signing existed. What is NOT
+ * optional is the outcome once checking is on: a signature that is present and
+ * wrong always refuses the file, whatever `requireSignature` says.
+ */
+function checkSignature(
+  envelope: Record<string, unknown>,
+  options: ParseOptions,
+): RejectedManifest | null {
+  const canCheck = options.verifySignature !== undefined && options.trustedKeys !== undefined;
+  const signed = envelope.signature !== undefined && envelope.signature !== null;
+
+  if (!canCheck) {
+    // Cannot check, but must not pretend. Requiring a signature this build has
+    // no way to verify is a configuration error, and failing closed is the only
+    // safe reading of it.
+    return options.requireSignature
+      ? {
+          ok: false,
+          reason: 'signature-required',
+          detail: 'A signature is required but this build has no key to check it against.',
+        }
+      : null;
+  }
+
+  if (!signed) {
+    return options.requireSignature
+      ? {
+          ok: false,
+          reason: 'signature-required',
+          detail: 'Manifest carries no signature, and this build requires one.',
+        }
+      : null;
+  }
+
+  const verdict = verifyManifestSignature(
+    envelope,
+    options.trustedKeys!,
+    options.verifySignature!,
+  );
+
+  return verdict.ok
+    ? null
+    : { ok: false, reason: 'signature-invalid', detail: verdict.detail };
 }
 
 /**

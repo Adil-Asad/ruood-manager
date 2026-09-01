@@ -4,8 +4,11 @@ Guidance for Claude Code working in this repository.
 
 ## Read this first
 
-**Phases 0, 1 and 2 are complete and approved. The next task is Phase 3
-(hardening), and it needs the operator's go-ahead before you start.**
+**Phases 0 to 3 are complete and approved. The next task is Phase 4 (RUŌOD Lab
+integration), and it needs the operator's go-ahead before you start.**
+
+Phase 4 is the first phase that touches `d:\app`. Nothing there has been
+modified yet, and nothing may be until that go-ahead.
 
 This project was designed and built in a previous session that ran from the
 RUŌOD Lab folder (`d:\app`). That session produced an architecture review, then
@@ -56,8 +59,8 @@ the decisions here.
 | **0** | Schema, validator, id rules, version comparison | **Complete** |
 | **1** | CLI + core: build, image pipeline, git publish, diff, revert | **Complete** |
 | **2** | Manager UI (Vite + React over `core`) | **Complete** |
-| **3** | Hardening: Ed25519 signing, staging channel, CI validation | **NEXT — needs approval** |
-| 4 | RUŌOD Lab integration: fetcher, eligibility, local state, presenter | Not started |
+| **3** | Hardening: Ed25519 signing, staging channel, CI validation | **Complete** |
+| **4** | RUŌOD Lab integration: fetcher, eligibility, local state, presenter | **NEXT — needs approval** |
 | 5 | In-app announcement inbox (Settings → Announcements) | Not started |
 
 **Nothing in RUŌOD Lab has been modified, and nothing may be until Phase 4.**
@@ -70,6 +73,12 @@ npm install                  # once, at the workspace root
 npm run build                # schema → core → cli → ui, in that order (required)
 npm test                     # every package
 npm run typecheck            # builds first, then typechecks all packages
+
+# signing and channels
+node packages/cli/dist/bin.js keygen --repo <path>          # once, per repository
+node packages/cli/dist/bin.js publish --repo <path> --sign
+node packages/cli/dist/bin.js publish --repo <path> --channel staging --sign
+node packages/cli/dist/bin.js verify --repo <path>          # what CI checks
 
 # the CLI, from the workspace root
 node packages/cli/dist/bin.js help
@@ -89,7 +98,7 @@ A full check before calling work done:
 npm run build && npm test && npm run typecheck
 ```
 
-Currently **489 tests across 15 suites** — 279 schema, 127 core, 34 cli, 49 ui.
+Currently **557 tests across 17 suites** — 306 schema, 159 core, 43 cli, 49 ui.
 Each package's suite is counted in its own run; `npm test` runs all four.
 
 **Build order is load-bearing.** `core`, `cli` and the `ui` server resolve
@@ -242,6 +251,85 @@ It renders body text as text, never as HTML. The validator refuses angle
 brackets so stored text can never read as markup, and the preview is the one
 place that could quietly make that false.
 
+### The signature covers the whole manifest, not each record
+
+`signature` and `keyId` sit on the manifest envelope, and the covered bytes are
+`manifestSigningInput` — the canonical COMPACT form of the envelope with
+`signature` removed and `keyId` left in.
+
+The per-record `signature` field is still reserved and still unused. It is not
+what secures the file, because the three highest-impact tampering targets are
+not inside any record:
+
+| Target | What a per-record signature would allow |
+| --- | --- |
+| `paused` | flip the kill switch on or off for every install |
+| `revision` | replay an old manifest as a current one |
+| the record set | delete an announcement, forging nothing |
+
+Compact rather than pretty, because `dist/announcements.json` is pretty-printed
+so it diffs like source and a signature must not break when a file is
+reformatted. Unknown fields are covered too — tolerating an unknown field is a
+rule about what a client may still read, never a licence to leave it
+unauthenticated.
+
+### The schema package still carries no crypto
+
+`signing.ts` defines *what* is signed and what a verdict means. The Ed25519
+itself is injected: `nodeSignatureVerifier` in the Manager, and a
+Hermes-compatible implementation in RUŌOD Lab in Phase 4. The isolation sweep
+bans `node:crypto` alongside `fs` and `Buffer` for exactly this reason — a
+`crypto` import here would end "one validator, two consumers".
+
+### A signature that does not verify refuses the WHOLE file
+
+`parseManifest` checks the signature before it reads a single record. There is
+no "signed by an unknown key, so show it anyway" and no salvaging of records
+from a file that failed — either would make pinning decorative.
+
+Checking is opt-in on the client having both keys and a verifier, so a build
+from before signing behaves exactly as it did. `requireSignature` is separate
+again, because "start checking" and "start requiring" roll out at different
+times; requiring a signature the build cannot check fails closed.
+
+### The private key never enters a repository
+
+`saveSigningKey` refuses a path inside one, by path containment rather than by
+trusting a `.gitignore` — the failure being prevented is precisely the one where
+the ignore rule is missing or was added after the first commit. The **public**
+key is committed on purpose, and a publish stages `keys/` so it travels with the
+first signed manifest rather than waiting to be remembered.
+
+Rotating is an app release: the public key is compiled into RUŌOD Lab, so a new
+key means every install on the old build rejects everything until it updates.
+`keygen` refuses to overwrite without `--force`.
+
+### Staging is a channel, not a branch
+
+`dist/staging/announcements.json` in the same repository, published by its own
+commit. It carries **drafts** as well as everything production gets — that is
+what it is for, and a staging manifest that excluded them would be a copy of
+production. Archived and expired records stay out of both.
+
+One publish is one channel and therefore one commit. Each stays atomic, each
+gets its own line in `git log`, and rolling back staging does not roll back
+production.
+
+### CI verifies, it does not re-validate
+
+`scripts/verify-manifest.mjs` is scaffolded into the announcements repository
+because what it has to catch is a commit the Manager did not produce. Every
+field rule was already enforced at publish time by `verifyPublishable`; CI asks
+the one question publish time cannot: *is this still the file that was signed?*
+
+It carries its own `canonicalCompactJson`, and that duplication is deliberate —
+its whole value is depending on nothing but the Node CI already has. If the copy
+drifts, CI fails on every correctly signed manifest: loud, immediate, and never
+quietly permissive.
+
+Revision 0 is the scaffolded placeholder and is skipped by both CI and
+`announce verify`. A build always increments, so nothing else can be 0.
+
 ## Where the complexity lives
 
 | File | What |
@@ -256,6 +344,9 @@ place that could quietly make that false.
 | `packages/ui/src/server/guards.ts` | Who may call a local server that can push |
 | `packages/ui/src/web/screens/editor.tsx` | The form; validates live with the app's own validator |
 | `packages/ui/src/web/screens/publish.tsx` | Dry run, read the diff, then confirm |
+| `packages/schema/src/signing.ts` | What a signature covers, and what a verdict means |
+| `packages/core/src/signing/keys.ts` | Making a key, and keeping it out of a repository |
+| `packages/core/src/ci/files.ts` | The dependency-free check CI runs in the announcements repo |
 
 Two things in `git/repository.ts` are non-obvious and were bugs once:
 

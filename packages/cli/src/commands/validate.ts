@@ -1,7 +1,7 @@
 import { buildManifest } from '@ruood/announcement-core';
 
 import type { CommandContext, CommandResult } from '../main';
-import { paths, reportIssues } from './shared';
+import { channelOf, paths, reportIssues } from './shared';
 
 /**
  * Validates without writing anything, including the revision counter — which
@@ -9,7 +9,16 @@ import { paths, reportIssues } from './shared';
  * number that appears in a published manifest.
  */
 export async function runValidate(ctx: CommandContext): Promise<CommandResult> {
-  const result = await buildManifest(paths(ctx), { now: ctx.now, keepRevision: true });
+  const channel = channelOf(ctx);
+  if (!channel) return 2;
+
+  // Unsigned on purpose: validate writes nothing and answers "would this
+  // publish", which does not depend on who signs it.
+  const result = await buildManifest(paths(ctx), {
+    now: ctx.now,
+    keepRevision: true,
+    channel,
+  });
 
   reportIssues(ctx, result.errors, result.warnings, result.problems);
 

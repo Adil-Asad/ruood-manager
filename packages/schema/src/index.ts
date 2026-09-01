@@ -18,6 +18,7 @@ export * from './issues';
 export * from './instant';
 export * from './semver';
 export * from './id';
+export * from './signing';
 export * from './validate-record';
 export * from './validate-manifest';
 export * from './parse-manifest';

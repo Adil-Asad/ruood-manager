@@ -187,7 +187,15 @@ as GitHub to a human and resolves elsewhere.
 
 ### `signature`
 
-`null` in v1. Reserved for Ed25519 over the canonical JSON in Phase 3.
+`null` in v1, and still unused.
+
+Phase 3 signs the **manifest envelope** rather than each record, because
+`paused`, `revision` and which records are present at all are not inside any
+record — and those are the three most valuable things to tamper with. See
+`manifest.signature` below, and *Signing* in `ARCHITECTURE.md`.
+
+The field stays reserved: removing it from a shipped schema would cost more than
+leaving it.
 
 ## Authored-only fields
 
@@ -220,3 +228,53 @@ dates the moment one was edited. Same rule as `usedInFormulas` in RUOOD Lab.
 | `too-many-modals-warning` | More than 3 modals live at once; at one per session the last may wait days. |
 
 Full issue-code list: `packages/schema/src/issues.ts`.
+
+## Manifest signature (Phase 3)
+
+Two optional fields on the manifest envelope.
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "revision": 4,
+  "generatedAt": "2026-09-15T12:00:00Z",
+  "paused": false,
+  "announcements": [ /* ... */ ],
+
+  "keyId": "5af5f4d8",
+  "signature": "base64, 88 characters"
+}
+```
+
+### `keyId`
+
+The first 8 hex characters of the sha256 of the raw 32-byte Ed25519 public key.
+Derived from the key, never assigned.
+
+A **hint**, not a credential: it tells a client which of its pinned keys to try.
+A client that does not recognise it refuses the manifest rather than trying its
+keys in turn.
+
+### `signature`
+
+Ed25519, base64, over `manifestSigningInput(envelope)` — the canonical
+**compact** JSON of the whole envelope with `signature` removed and `keyId` left
+in.
+
+| Property | Why |
+| --- | --- |
+| Compact, not pretty | the file is pretty-printed so it diffs like source; a signature must survive reformatting |
+| `keyId` covered | so it cannot be relabelled to point at another key |
+| Unknown fields covered | adding one changes the covered bytes and breaks the signature |
+| `signature` excluded | it cannot cover itself |
+
+Verification is injected, never implemented in this package — it has no crypto,
+so the same code runs under a node-only jest config and inside a Hermes bundle.
+
+**A signature that does not verify refuses the whole file**, before any record
+is read. There is no partial acceptance and no downgrade to unsigned.
+
+Both fields are optional. A repository that has not run `announce keygen`
+publishes without them, and a client without pinned keys ignores them — signing
+is something each side turns on, and `requireSignature` is a third switch again,
+so "start checking" and "start requiring" can happen at different times.

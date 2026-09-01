@@ -9,11 +9,17 @@
 
 import type { FastifyInstance } from 'fastify';
 
-import { AnnouncementRepo, readPublished } from '@ruood/announcement-core';
+import {
+  AnnouncementRepo,
+  defaultKeyPath,
+  loadPublicKeyRecord,
+  loadSigningKey,
+  readPublished,
+} from '@ruood/announcement-core';
 import { toCanonicalInstant, type LifecycleStatus } from '@ruood/announcement-schema';
 
 import type { ServerContext } from '../context';
-import type { GitState, ManagerState } from '../../shared/api';
+import type { GitState, ManagerState, PublishedState, SigningState } from '../../shared/api';
 import { snapshotOf, summarise } from './helpers';
 
 export function registerStateRoutes(app: FastifyInstance, ctx: ServerContext): void {
@@ -22,7 +28,8 @@ export function registerStateRoutes(app: FastifyInstance, ctx: ServerContext): v
   app.get('/api/state', async (): Promise<ManagerState> => {
     const now = ctx.now();
     const snapshot = await snapshotOf(ctx);
-    const published = await readPublished(ctx.paths);
+    const published = await readPublished(ctx.paths, 'production');
+    const staging = await readPublished(ctx.paths, 'staging');
     const records = summarise(snapshot, now);
 
     const counts: Partial<Record<LifecycleStatus, number>> = {};
@@ -38,22 +45,63 @@ export function registerStateRoutes(app: FastifyInstance, ctx: ServerContext): v
       failures: snapshot.failures,
       retiredIds: snapshot.retiredIds,
       contentRevision: snapshot.revision,
-      published: published.manifest
-        ? {
-            revision: published.manifest.revision,
-            bytes: published.bytes,
-            records: published.manifest.announcements.length,
-            images: Object.keys(published.images).length,
-            generatedAt: published.manifest.generatedAt,
-            paused: published.manifest.paused,
-          }
-        : null,
+      published: publishedState(published),
+      publishedStaging: publishedState(staging),
+      signing: await signingState(ctx),
       git: await gitState(ctx),
       // The same check `announce status` makes: the counter content/ believes
       // in has moved past the one dist/ was built at, so dist/ is behind.
       distStale: snapshot.revision !== (published.manifest?.revision ?? 0),
     };
   });
+}
+
+function publishedState(
+  read: Awaited<ReturnType<typeof readPublished>>,
+): PublishedState | null {
+  if (!read.manifest) return null;
+
+  return {
+    revision: read.manifest.revision,
+    bytes: read.bytes,
+    records: read.manifest.announcements.length,
+    images: Object.keys(read.images).length,
+    generatedAt: read.manifest.generatedAt,
+    paused: read.manifest.paused,
+    signedBy: read.manifest.keyId ?? null,
+  };
+}
+
+/**
+ * What the repository expects, and whether the Manager can actually sign.
+ *
+ * Both halves, because knowing the repository wants signatures is not the same
+ * as being able to produce one — and finding out at publish time is finding out
+ * late.
+ */
+async function signingState(ctx: ServerContext): Promise<SigningState> {
+  const keyPath = defaultKeyPath();
+
+  let expectedKeyId: string | null = null;
+  let problem: string | null = null;
+
+  try {
+    expectedKeyId = (await loadPublicKeyRecord(ctx.root))?.keyId ?? null;
+  } catch (error) {
+    // A corrupt public key record must never read as "this repository is
+    // unsigned" — that would quietly turn the whole mechanism off.
+    problem = (error as Error).message;
+  }
+
+  let keyAvailable = false;
+  try {
+    await loadSigningKey(keyPath);
+    keyAvailable = true;
+  } catch {
+    keyAvailable = false;
+  }
+
+  return { expectedKeyId, keyAvailable, keyPath, problem };
 }
 
 /**

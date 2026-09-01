@@ -12,6 +12,7 @@
  */
 
 import type {
+  Channel,
   ExcludedRecord,
   PublishDiff,
   PublishStatus,
@@ -29,7 +30,24 @@ import type {
   ValidationIssue,
 } from '@ruood/announcement-schema';
 
-export type { PublishDiff, PublishStatus, PushOutcome, RepoStatus, Transition };
+export type { Channel, PublishDiff, PublishStatus, PushOutcome, RepoStatus, Transition };
+
+/**
+ * What the repository knows about signing.
+ *
+ * `expectedKeyId` comes from the committed public key; `signedBy` from the
+ * manifest actually published. The two disagreeing is the state worth shouting
+ * about — it means every install is rejecting what is up there.
+ */
+export interface SigningState {
+  /** The key this repository says its manifests must be signed by. */
+  expectedKeyId: string | null;
+  /** True when a usable private key was found where the Manager looks. */
+  keyAvailable: boolean;
+  keyPath: string;
+  /** Anything wrong with the public key record, ready to show. */
+  problem: string | null;
+}
 
 /** One row of the record list. Enough to search, sort and show; never the whole record. */
 export interface RecordSummary {
@@ -61,6 +79,8 @@ export interface PublishedState {
   images: number;
   generatedAt: string;
   paused: boolean;
+  /** The key id in the published file, or `null` if it carries no signature. */
+  signedBy: string | null;
 }
 
 /**
@@ -84,6 +104,9 @@ export interface ManagerState {
   retiredIds: string[];
   contentRevision: number;
   published: PublishedState | null;
+  /** The staging channel, which additionally carries drafts. */
+  publishedStaging: PublishedState | null;
+  signing: SigningState;
   git: GitState;
   /** True when `dist/` no longer matches what `content/` would produce. */
   distStale: boolean;
@@ -166,6 +189,9 @@ export interface ImageAttachResponse extends RecordDetail {
 /** `BuildResult` without the megabytes of image data it also carries. */
 export interface BuildSummary {
   ok: boolean;
+  channel: Channel;
+  /** The key the manifest was signed with, or `null` for an unsigned build. */
+  signedBy: string | null;
   revision: number;
   bytes: number;
   records: number;
@@ -178,6 +204,10 @@ export interface BuildSummary {
 
 export interface PublishRequest {
   dryRun: boolean;
+  /** Defaults to production. Staging additionally publishes drafts. */
+  channel?: Channel;
+  /** Sign with the repository's key. Refused if the key cannot be loaded. */
+  sign?: boolean;
   acceptWarnings?: boolean;
   noPush?: boolean;
   /** The global kill switch. Omitted means "leave it as it is" — it is sticky. */

@@ -31,6 +31,8 @@ import { runRevert } from './commands/revert';
 import { runDelete } from './commands/delete';
 import { runEdit } from './commands/edit';
 import { runPush } from './commands/push';
+import { runKeygen } from './commands/keygen';
+import { runVerify } from './commands/verify';
 
 export interface CommandContext {
   args: ParsedArgs;
@@ -51,6 +53,8 @@ const COMMANDS: Record<string, (ctx: CommandContext) => Promise<CommandResult>> 
   build: runBuild,
   publish: runPublish,
   push: runPush,
+  keygen: runKeygen,
+  verify: runVerify,
   status: runStatus,
   revert: runRevert,
   delete: runDelete,
@@ -119,6 +123,9 @@ function usage(): string {
 
 SETUP
   init                          create the repository skeleton and git-init it
+  keygen                        create the Ed25519 signing key (once, per repo)
+      [--key <path>]            default ~/.ruood/announcement-signing.key
+      [--force]                 rotate — this is an app release, read the warning
 
 AUTHORING
   new <id>                      create a draft
@@ -152,9 +159,14 @@ PUBLISHING
           [--pause | --unpause]    the global kill switch
   push                          push commits publish made but could not send
   status                        repository and publication state
+  verify [--channel <c>]        check dist/ still matches the repository's key
   revert <commit>               revert a publish
 
 OPTIONS
+  --channel production|staging  which manifest. Default production; staging
+                                additionally publishes DRAFTS, which is its point
+  --sign                        sign the manifest with the key
+  --key <path>                  the signing key. Implies --sign
   --now <instant>               fix the clock, for reproducible builds and tests
 `;
 }
