@@ -29,6 +29,8 @@ import { runImage } from './commands/image';
 import { runStatus } from './commands/status';
 import { runRevert } from './commands/revert';
 import { runDelete } from './commands/delete';
+import { runEdit } from './commands/edit';
+import { runPush } from './commands/push';
 
 export interface CommandContext {
   args: ParsedArgs;
@@ -43,10 +45,12 @@ export type CommandResult = 0 | 1 | 2;
 const COMMANDS: Record<string, (ctx: CommandContext) => Promise<CommandResult>> = {
   init: runInit,
   new: runNew,
+  edit: runEdit,
   list: runList,
   validate: runValidate,
   build: runBuild,
   publish: runPublish,
+  push: runPush,
   status: runStatus,
   revert: runRevert,
   delete: runDelete,
@@ -120,6 +124,15 @@ AUTHORING
   new <id>                      create a draft
       --title <text> --body <text> [--start <instant>] [--end <instant>]
       [--surface modal|banner|inbox] [--category feature|fix|notice|tip]
+  edit <id>                     change content fields (never id, status or rev)
+      [--title <text>] [--body <text>] [--category <category>]
+      [--priority <0-100>] [--start <instant>] [--end <instant> | --no-end]
+      [--surface modal|banner|inbox] [--trigger next-launch|immediate]
+      [--dismiss permanent|session|snooze-24h|none]
+      [--max-impressions <n>|unlimited] [--min-interval <hours>]
+      [--platforms android,ios,web] [--min-version <v>|none] [--max-version <v>|none]
+      [--action-route <target> | --action-external <url> | --no-action]
+      [--action-label <text>] [--note <text> | --no-note] [--remove-image]
   list [--status <status>]      list records with their derived lifecycle state
   image <id> <file>             encode and attach an image
       [--alt <text>]
@@ -137,6 +150,7 @@ PUBLISHING
   publish [--dry-run]           build, verify, commit and push
           [--accept-warnings] [--no-push] [--message <text>]
           [--pause | --unpause]    the global kill switch
+  push                          push commits publish made but could not send
   status                        repository and publication state
   revert <commit>               revert a publish
 

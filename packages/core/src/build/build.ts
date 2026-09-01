@@ -36,6 +36,7 @@ import {
 import { idRegistryFrom, loadContent } from '../content/store';
 import { imageName, type RepoPaths } from '../paths';
 import { encodeAnnouncementImage, sha256Of } from '../images/encode';
+import { findOriginalFor } from '../images/attach';
 import { projectManifest, type ExcludedRecord } from './project';
 import type { ImageInventory } from '../publish/diff';
 
@@ -195,7 +196,7 @@ async function resolveImages(
       continue;
     }
 
-    const original = await findOriginal(paths, record.id);
+    const original = await findOriginalFor(paths, record.id);
     if (!original) {
       imageProblems.push(
         `"${record.id}" references ${record.image.path}, but neither the built file nor an ` +
@@ -226,17 +227,6 @@ async function resolveImages(
   }
 
   return { images, imageFiles, imageProblems };
-}
-
-async function findOriginal(paths: RepoPaths, id: string): Promise<Buffer | null> {
-  if (!existsSync(paths.media)) return null;
-
-  for (const entry of await readdir(paths.media)) {
-    if (entry.replace(/\.[^.]+$/, '') === id) {
-      return readFile(join(paths.media, entry));
-    }
-  }
-  return null;
 }
 
 /** Writes the build to `dist/`, pruning any image nothing references. */

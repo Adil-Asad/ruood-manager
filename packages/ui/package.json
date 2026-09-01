@@ -1,0 +1,29 @@
+{
+  "name": "@ruood/announcement-ui",
+  "version": "0.1.0",
+  "description": "The Manager: a local web front end over @ruood/announcement-core. Runs on the operator's own machine, never deployed.",
+  "license": "UNLICENSED",
+  "main": "dist/server/app.js",
+  "bin": { "announce-ui": "dist/server/bin.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && vite build",
+    "build:server": "tsc -p tsconfig.json",
+    "dev": "vite",
+    "start": "node dist/server/bin.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json && tsc -p tsconfig.test.json",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@ruood/announcement-core": "0.1.0",
+    "@ruood/announcement-schema": "0.1.0",
+    "fastify": "^5.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.7"
+  }
+}

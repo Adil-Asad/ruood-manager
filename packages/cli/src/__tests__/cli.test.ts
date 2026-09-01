@@ -380,3 +380,164 @@ describe('status', () => {
     });
   });
 });
+
+describe('edit', () => {
+  it('changes content fields and leaves the rest alone', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('new', 'thing', '--title', 'A', '--body', 'B');
+
+      const result = await run(
+        'edit',
+        'thing',
+        '--title',
+        'A better title',
+        '--priority',
+        '80',
+        '--surface',
+        'banner',
+      );
+
+      expect(result.code).toBe(0);
+      expect(result.out).toContain('display, priority, title');
+
+      const record = JSON.parse(
+        await readFile(join(repo, 'content', 'announcements', 'thing.json'), 'utf8'),
+      );
+      expect(record.title).toBe('A better title');
+      expect(record.priority).toBe(80);
+      expect(record.display.surface).toBe('banner');
+      // Untouched fields survive a partial edit.
+      expect(record.body).toBe('B');
+      expect(record.display.trigger).toBe('next-launch');
+    });
+  });
+
+  it('never edits rev — that is a separate command with a separate consequence', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('new', 'thing', '--title', 'A', '--body', 'B');
+
+      // There is no --rev flag at all, so the field cannot be reached from here.
+      const result = await run('edit', 'thing', '--rev', '5');
+      expect(result.code).toBe(2);
+      expect(result.err).toContain('Nothing to change');
+
+      const record = JSON.parse(
+        await readFile(join(repo, 'content', 'announcements', 'thing.json'), 'utf8'),
+      );
+      expect(record.rev).toBe(1);
+    });
+  });
+
+  it('refuses an edit that would leave the record invalid, and writes nothing', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('new', 'thing', '--title', 'A', '--body', 'B');
+
+      const result = await run('edit', 'thing', '--title', 'x'.repeat(200));
+
+      expect(result.code).toBe(1);
+      expect(result.err).toContain('text-too-long');
+
+      const record = JSON.parse(
+        await readFile(join(repo, 'content', 'announcements', 'thing.json'), 'utf8'),
+      );
+      expect(record.title).toBe('A');
+    });
+  });
+
+  it('says that editing a published record does not re-show it', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('new', 'thing', '--title', 'A', '--body', 'B');
+      await run('activate', 'thing');
+
+      const result = await run('edit', 'thing', '--body', 'A corrected body.');
+      expect(result.out).toContain('does NOT re-show');
+      expect(result.out).toContain('announce bump thing');
+    });
+  });
+
+  it('clears an end date with --no-end and refuses both at once', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('new', 'thing', '--title', 'A', '--body', 'B', '--end', '2026-12-01T00:00:00Z');
+
+      expect((await run('edit', 'thing', '--end', '2027-01-01T00:00:00Z', '--no-end')).code).toBe(2);
+
+      expect((await run('edit', 'thing', '--no-end')).code).toBe(0);
+      const record = JSON.parse(
+        await readFile(join(repo, 'content', 'announcements', 'thing.json'), 'utf8'),
+      );
+      expect(record.endAt).toBeNull();
+    });
+  });
+
+  it('sets and removes an action', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('new', 'thing', '--title', 'A', '--body', 'B');
+
+      const file = join(repo, 'content', 'announcements', 'thing.json');
+
+      expect(
+        (await run('edit', 'thing', '--action-route', 'tools.reports', '--action-label', 'Open'))
+          .code,
+      ).toBe(0);
+      expect(JSON.parse(await readFile(file, 'utf8')).action).toEqual({
+        type: 'route',
+        label: 'Open',
+        target: 'tools.reports',
+      });
+
+      expect((await run('edit', 'thing', '--no-action')).code).toBe(0);
+      expect(JSON.parse(await readFile(file, 'utf8')).action).toBeUndefined();
+    });
+  });
+
+  it('refuses an action target that is not on the closed list', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('new', 'thing', '--title', 'A', '--body', 'B');
+
+      const result = await run(
+        'edit',
+        'thing',
+        '--action-route',
+        'settings.factory-reset',
+        '--action-label',
+        'Reset',
+      );
+
+      expect(result.code).toBe(1);
+      expect(result.err).toContain('action-target-not-allowed');
+    });
+  });
+
+  it('requires an id and at least one field', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('new', 'thing', '--title', 'A', '--body', 'B');
+
+      expect((await run('edit')).code).toBe(2);
+      expect((await run('edit', 'thing')).code).toBe(2);
+    });
+  });
+});
+
+describe('push', () => {
+  it('reports that there is no remote rather than pretending to publish', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('new', 'thing', '--title', 'A', '--body', 'B');
+      await run('activate', 'thing');
+      await run('publish', '--no-push', '--accept-warnings');
+
+      const result = await run('push');
+      expect(result.code).toBe(1);
+      expect(result.err).toContain('No git remote');
+      expect(result.err).toContain('intact locally');
+    });
+  });
+});

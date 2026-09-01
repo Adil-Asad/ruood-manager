@@ -44,8 +44,8 @@ Three rules the design exists to hold:
 | --- | --- | --- |
 | **0** | Schema, validator, id rules, version comparison | **Complete** |
 | **1** | CLI + core: build, image pipeline, git publish, diff, revert | **Complete** |
-| 2 | Manager UI (Vite + React) | **Next** |
-| 3 | Hardening: Ed25519 signing, staging channel, CI validation | Not started |
+| **2** | Manager UI (Vite + React over `core`) | **Complete** |
+| 3 | Hardening: Ed25519 signing, staging channel, CI validation | **Next** |
 | 4 | RUOOD Lab integration: fetcher, eligibility, local state, presenter | Not started |
 | 5 | In-app announcement inbox | Not started |
 
@@ -58,8 +58,10 @@ packages/
   schema/     @ruood/announcement-schema — the contract. Zero dependencies,
               platform-neutral, node-testable. Ships into RUOOD Lab's bundle.
   core/       build, image pipeline, git publish, diff, revert
-  cli/        announce: init | new | image | activate | publish | revert | ...
-  ui/         (Phase 2) the local web UI
+  cli/        announce: init | new | edit | image | activate | publish | revert | ...
+  ui/         the Manager — a local web UI over core. Loopback only, never
+              deployed. server/ is Fastify, web/ is React, shared/ is the
+              wire contract.
 workspace/    (Phase 1) the cloned announcements repo — gitignored
 docs/         architecture and schema reference
 ```
@@ -73,7 +75,14 @@ npm run typecheck                        # every package
 npm run build                            # every package
 
 npm test --workspace @ruood/announcement-schema
+
+# the Manager UI, against an announcements repository
+npm run ui -- --repo workspace/demo        # then open http://127.0.0.1:4874
 ```
+
+The UI is a second front end over the same `core` functions the CLI calls, so
+anything it can do the CLI can do too — which is what makes it safe for it to be
+the convenient way rather than the only way.
 
 A full check before calling work done:
 
@@ -81,7 +90,7 @@ A full check before calling work done:
 npm run typecheck && npm test && npm run build
 ```
 
-Currently **377 tests across 12 suites** — 279 schema, 98 core, 25 cli.
+Currently **489 tests across 15 suites** — 279 schema, 127 core, 34 cli, 49 ui.
 
 ## Reading order
 

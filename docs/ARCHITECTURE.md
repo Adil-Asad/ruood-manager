@@ -221,6 +221,95 @@ overlapping options became `maxImpressions`, `minIntervalHours` and `dismiss`.
 `surface` is the axis that was missing. Without it every announcement is a
 blocking modal, and the practical result is that you stop sending them.
 
+## The Manager UI
+
+A local web app over `core`. The decisions worth recording are the ones that
+were not obvious.
+
+### Why a server at all
+
+A browser cannot touch the filesystem, run git, or encode an image with `sharp`.
+So there is a Fastify process, and it is kept to exactly that: it maps HTTP onto
+`core` calls and back. It holds no state, because the repository is the system
+of record and a cache in the server would be a second copy to disagree with it.
+
+`GET /api/state` answers the whole shell in one request. Two requests would let
+the counts and the git state disagree by however long the second one took.
+
+### Why the UI implements nothing
+
+Every operation already existed as a `core` function the CLI calls. Two front
+ends over one set of functions cannot drift about what "archive" means; two
+implementations will. Where the UI needed something `core` lacked, it went into
+`core` and got a CLI command as well:
+
+| Added to `core` | CLI | Why the UI needed it |
+| --- | --- | --- |
+| `applyEdits` | `announce edit` | a form writes arbitrary fields; `touch` accepts any of them |
+| `attachImage` | (used by `announce image`) | one original per id, enforced |
+| `readEncodedImage` | — | preview bytes before a build has run |
+
+`applyEdits` also fixed something that was latent: `content/media/` must hold
+exactly one original per id, because the build finds an original by filename
+stem and cannot choose between two. Attaching an image now removes the one it
+replaces. The CLI had the same hole; making image replacement easy in a UI is
+what would have found it in production.
+
+### Why `rev` is not on the editor form
+
+Bumping it resets impression counters on every device. It has its own button,
+its own confirmation and its own sentence, and `applyEdits` refuses it outright.
+Keeping the field separate in the schema achieves nothing if the UI lets it be
+changed while fixing a typo.
+
+`id` and `status` are excluded from the same list for the same kind of reason —
+an id is immutable because it keys device state, and status moves only through
+the transition table. `applyEdits` **refuses** rather than dropping: a silent
+drop looks to the caller like a successful save.
+
+### Why the server checks Host and Origin
+
+It binds `127.0.0.1`, which stops anything off the machine. It does not stop a
+browser: any page on any site can issue requests to a loopback port, and DNS
+rebinding can make one same-origin by the browser's reckoning. This process can
+commit and push to the repository every install reads.
+
+Three checks, no dependency and no token to store:
+
+- `Host` must name loopback — a rebinding request carries the attacker's
+  hostname, which is what gives it away;
+- `Origin`, when the browser sends one, must be an origin we serve;
+- a mutation must be `application/json` or `application/octet-stream`, neither
+  of which an HTML form can produce.
+
+A token was considered and rejected: it would be state to store and to get to
+the client, and it buys nothing the above does not already cover.
+
+### Why the browser runs the real validator
+
+`@ruood/announcement-schema` is zero-dependency and platform-neutral, so the
+editor imports it directly and validates every keystroke with the same code that
+will refuse the record at publish time and that RUOOD Lab will run over the
+downloaded file. The server validates again before writing — this is not a
+substitute for that, it is the same answer arriving early enough to act on.
+
+Vite aliases the package to its TypeScript source. It has to: the built output
+is CommonJS, and `export *` compiles to an `__exportStar` call that Rollup
+cannot analyse, so named imports resolve as types and then fail at bundle time.
+
+### Why the preview is a copy
+
+RUOOD Lab's tokens are copied into a stylesheet, not shared. A component
+rendering in both React Native and the DOM would be a dependency between two
+repositories with different release cycles — and an app-store review sitting in
+the middle of it — to buy pixel fidelity in a preview. The preview says on
+screen that it is approximate, and it is good for the question an operator
+actually has: does this title fit, does this body run to six lines, does the
+image crop badly.
+
+Four frames always: 360 and 430 wide, light and dark. An announcement is
+authored once and seen in whichever theme the user has set.
+
 ## What the client will store (Phase 4)
 
 One AsyncStorage key. Not a table, not a repository, not a provider other things

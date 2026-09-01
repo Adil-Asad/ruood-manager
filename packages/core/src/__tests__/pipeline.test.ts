@@ -20,6 +20,7 @@ import { repoPaths } from '../paths';
 import { saveRecord, loadContent, deleteRecord } from '../content/store';
 import { buildManifest, readPublished, writeBuild } from '../build/build';
 import { encodeAnnouncementImage } from '../images/encode';
+import { attachImage, readEncodedImage } from '../images/attach';
 import { publish } from '../publish/publish';
 import { AnnouncementRepo } from '../git/repository';
 import { NOW, authored, withTempDir } from './fixtures';
@@ -518,6 +519,170 @@ describe('the repository is self-contained', () => {
       await writeBuild(paths, rebuilt);
 
       expect(await readFile(paths.manifest, 'utf8')).toBe(original);
+    });
+  });
+});
+
+describe('attaching an image', () => {
+  it('encodes, stamps the record and keeps the original', async () => {
+    await withTempDir(async (dir) => {
+      const { paths } = await scaffoldRepository(dir);
+      const source = await samplePng();
+
+      const attached = await attachImage(paths, {
+        id: 'reports-center',
+        alt: 'The Reports screen',
+        source,
+        filename: 'shot.png',
+      });
+
+      expect(attached.image.path).toMatch(/^images\/reports-center-[0-9a-f]{8}\.webp$/);
+      expect(attached.image.alt).toBe('The Reports screen');
+      expect(existsSync(join(paths.media, 'reports-center.png'))).toBe(true);
+      expect(attached.replacedOriginals).toEqual([]);
+    });
+  });
+
+  it('keeps exactly one original per id, so a later build cannot pick the stale one', async () => {
+    await withTempDir(async (dir) => {
+      const { paths } = await scaffoldRepository(dir);
+
+      await attachImage(paths, {
+        id: 'reports-center',
+        alt: 'First',
+        source: await samplePng(800, 450),
+        filename: 'first.png',
+      });
+
+      // A different extension is the case that used to leave two files with the
+      // same stem — and the build finds an original by stem.
+      const second = await attachImage(paths, {
+        id: 'reports-center',
+        alt: 'Second',
+        source: await sharp(await samplePng(640, 400)).jpeg().toBuffer(),
+        filename: 'second.jpg',
+      });
+
+      expect(second.replacedOriginals).toEqual(['reports-center.png']);
+
+      const kept = (await readdir(paths.media)).filter((entry) => entry.startsWith('reports-center'));
+      expect(kept).toEqual(['reports-center.jpg']);
+    });
+  });
+
+  it('rebuilds from whichever original is kept, and the hashes agree', async () => {
+    await withTempDir(async (dir) => {
+      const { paths } = await scaffoldRepository(dir);
+
+      await attachImage(paths, {
+        id: 'reports-center',
+        alt: 'First',
+        source: await samplePng(800, 450),
+        filename: 'first.png',
+      });
+
+      const second = await attachImage(paths, {
+        id: 'reports-center',
+        alt: 'Second',
+        source: await sharp(await samplePng(640, 400)).jpeg().toBuffer(),
+        filename: 'second.jpg',
+      });
+
+      await saveRecord(paths, authored({ image: second.image }));
+
+      // dist/ is empty, so this is the re-encode-from-original path.
+      const result = await buildManifest(paths, { now: NOW });
+      expect(result.problems).toEqual([]);
+      expect(result.ok).toBe(true);
+    });
+  });
+
+  it('writes nothing when the bytes will not encode', async () => {
+    await withTempDir(async (dir) => {
+      const { paths } = await scaffoldRepository(dir);
+
+      await expect(
+        attachImage(paths, {
+          id: 'reports-center',
+          alt: 'x',
+          source: Buffer.from('this is not an image'),
+          filename: 'shot.png',
+        }),
+      ).rejects.toThrow();
+
+      expect(existsSync(join(paths.media, 'reports-center.png'))).toBe(false);
+    });
+  });
+
+  it('refuses a source format that is not on the accepted list', async () => {
+    await withTempDir(async (dir) => {
+      const { paths } = await scaffoldRepository(dir);
+
+      await expect(
+        attachImage(paths, {
+          id: 'reports-center',
+          alt: 'x',
+          source: await samplePng(),
+          filename: 'drawing.svg',
+        }),
+      ).rejects.toThrow(/not an accepted source format/);
+    });
+  });
+});
+
+describe('reading an image back for a preview', () => {
+  it('re-encodes from the original before any build has run', async () => {
+    await withTempDir(async (dir) => {
+      const { paths } = await scaffoldRepository(dir);
+
+      const attached = await attachImage(paths, {
+        id: 'reports-center',
+        alt: 'The Reports screen',
+        source: await samplePng(),
+        filename: 'shot.png',
+      });
+
+      expect(existsSync(join(paths.images, 'reports-center.webp'))).toBe(false);
+
+      const bytes = await readEncodedImage(paths, {
+        id: 'reports-center',
+        image: attached.image,
+      });
+
+      expect(bytes).not.toBeNull();
+      expect((await sharp(bytes!).metadata()).format).toBe('webp');
+    });
+  });
+
+  it('serves the built file once there is one', async () => {
+    await withTempDir(async (dir) => {
+      const { paths } = await scaffoldRepository(dir);
+
+      const attached = await attachImage(paths, {
+        id: 'reports-center',
+        alt: 'The Reports screen',
+        source: await samplePng(),
+        filename: 'shot.png',
+      });
+      await saveRecord(paths, authored({ image: attached.image }));
+
+      const built = await buildManifest(paths, { now: NOW });
+      await writeBuild(paths, built);
+
+      const bytes = await readEncodedImage(paths, {
+        id: 'reports-center',
+        image: attached.image,
+      });
+
+      expect(bytes).not.toBeNull();
+      expect(bytes!.length).toBe(attached.image.bytes);
+    });
+  });
+
+  it('is null when there is nothing to show, rather than throwing', async () => {
+    await withTempDir(async (dir) => {
+      const { paths } = await scaffoldRepository(dir);
+      expect(await readEncodedImage(paths, { id: 'nothing' })).toBeNull();
     });
   });
 });

@@ -15,12 +15,14 @@ export * from './scaffold';
 
 export * from './content/defaults';
 export * from './content/authoring';
+export * from './content/edit';
 export * from './content/store';
 
 export * from './build/project';
 export * from './build/build';
 
 export * from './images/encode';
+export * from './images/attach';
 
 export * from './publish/diff';
 export * from './publish/publish';

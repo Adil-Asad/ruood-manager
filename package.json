@@ -9,8 +9,11 @@
   "scripts": {
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run build && npm run typecheck --workspaces --if-present",
-    "build": "npm run build -w @ruood/announcement-schema && npm run build -w @ruood/announcement-core && npm run build -w @ruood/announcement-cli",
-    "announce": "node packages/cli/dist/bin.js"
+    "build": "npm run build -w @ruood/announcement-schema && npm run build -w @ruood/announcement-core && npm run build -w @ruood/announcement-cli && npm run build -w @ruood/announcement-ui",
+    "announce": "node packages/cli/dist/bin.js",
+    "ui": "node packages/ui/dist/server/bin.js",
+    "ui:api": "node packages/ui/dist/server/bin.js --dev",
+    "ui:web": "npm run dev -w @ruood/announcement-ui"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

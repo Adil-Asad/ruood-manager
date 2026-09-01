@@ -1,0 +1,649 @@
+/*
+ * The Manager's own chrome.
+ *
+ * Deliberately NOT RUOOD Lab's design. This is an operator tool that decides
+ * what a million installs see, and it should look like one — dense, plain, and
+ * visibly a different thing from the app it publishes to. The only place the
+ * app's own tokens appear is inside the preview, which is fenced off in
+ * `ruood.css` precisely so the two can never quietly blend.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --border: #d8dde5;
+  --border-strong: #b9c1cd;
+
+  --text: #16191d;
+  --text-dim: #5b6472;
+  --text-faint: #838d9c;
+
+  --accent: #1f5fa8;
+  --accent-text: #ffffff;
+
+  --danger: #a8261f;
+  --danger-bg: #fdeceb;
+  --warn: #8a5a06;
+  --warn-bg: #fdf3e0;
+  --ok: #1d6b3f;
+  --ok-bg: #e9f5ee;
+
+  --radius: 8px;
+  --radius-sm: 5px;
+  --gap: 12px;
+
+  --mono: SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171b;
+    --surface: #1c2026;
+    --surface-2: #23282f;
+    --border: #333a44;
+    --border-strong: #47505d;
+
+    --text: #e6e9ee;
+    --text-dim: #a3adbb;
+    --text-faint: #7c8794;
+
+    --accent: #5fa0e8;
+    --accent-text: #0d1117;
+
+    --danger: #f08a83;
+    --danger-bg: #3a1c1a;
+    --warn: #e0b464;
+    --warn-bg: #382c14;
+    --ok: #7fce9f;
+    --ok-bg: #16301f;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+a {
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------------- shell -- */
+
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex-wrap: wrap;
+}
+
+.brand {
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/*
+ * The repository, always visible.
+ *
+ * There is no ambient "current repository" in the CLI because publishing to the
+ * wrong one is not a mistake worth leaving available. The UI keeps the same
+ * property by never letting the operator forget which one is open.
+ */
+.repo-chip {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  max-width: 46ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+nav.tabs {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+nav.tabs button {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font: inherit;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+nav.tabs button:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+nav.tabs button[aria-current='page'] {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+  font-weight: 600;
+}
+
+main {
+  flex: 1;
+  padding: 20px;
+  max-width: 1180px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ----------------------------------------------------------- structure -- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.card + .card {
+  margin-top: var(--gap);
+}
+
+.card h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.card h3 {
+  margin: 18px 0 6px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.card h3:first-child {
+  margin-top: 0;
+}
+
+.hint {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.row {
+  display: flex;
+  gap: var(--gap);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.row.tight {
+  gap: 6px;
+}
+
+.spread {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--gap);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 400px);
+  gap: var(--gap);
+  align-items: start;
+}
+
+@media (max-width: 1000px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--gap);
+}
+
+/* ------------------------------------------------------------- controls -- */
+
+button.btn {
+  font: inherit;
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+button.btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+button.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+button.btn.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+button.btn.small {
+  padding: 4px 9px;
+  font-size: 13px;
+}
+
+label.field {
+  display: block;
+  margin-bottom: 14px;
+}
+
+label.field > .label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+label.field .counter {
+  font-family: var(--mono);
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+label.field .counter.over {
+  color: var(--danger);
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  font: inherit;
+  padding: 7px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+input[type='checkbox'] {
+  width: auto;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 90px;
+  font-family: inherit;
+}
+
+.field-note {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 3px;
+}
+
+.field-error {
+  font-size: 12px;
+  color: var(--danger);
+  margin-top: 3px;
+}
+
+fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin: 0 0 14px;
+}
+
+legend {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 0 4px;
+}
+
+/* --------------------------------------------------------------- table -- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+tr.clickable {
+  cursor: pointer;
+}
+
+tr.clickable:hover td {
+  background: var(--surface-2);
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* -------------------------------------------------------------- badges -- */
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 100px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.badge.active {
+  background: var(--ok-bg);
+  color: var(--ok);
+  border-color: transparent;
+}
+
+.badge.scheduled {
+  background: var(--surface-2);
+  color: var(--accent);
+  border-color: transparent;
+}
+
+.badge.paused,
+.badge.expired {
+  background: var(--warn-bg);
+  color: var(--warn);
+  border-color: transparent;
+}
+
+.badge.draft,
+.badge.archived {
+  background: var(--surface-2);
+  color: var(--text-faint);
+  border-color: transparent;
+}
+
+.badge.error {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: transparent;
+}
+
+/* ------------------------------------------------------------ callouts -- */
+
+.callout {
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin: 10px 0;
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
+.callout.error {
+  background: var(--danger-bg);
+  border-left-color: var(--danger);
+  color: var(--danger);
+}
+
+.callout.warn {
+  background: var(--warn-bg);
+  border-left-color: var(--warn);
+  color: var(--warn);
+}
+
+.callout.ok {
+  background: var(--ok-bg);
+  border-left-color: var(--ok);
+  color: var(--ok);
+}
+
+.callout strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.callout ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+/* The kill switch never gets a quiet presentation. */
+.kill-switch {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-weight: 600;
+}
+
+.issue {
+  font-size: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.issue:last-child {
+  border-bottom: 0;
+}
+
+.issue .code {
+  font-family: var(--mono);
+  color: var(--text-faint);
+}
+
+.issue .path {
+  font-family: var(--mono);
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------------- misc -- */
+
+.stat {
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.stat .value {
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.1;
+}
+
+.stat .label {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: capitalize;
+}
+
+pre.diff {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  overflow-x: auto;
+  margin: 0;
+  white-space: pre;
+}
+
+.diff-line.added {
+  color: var(--ok);
+}
+
+.diff-line.removed {
+  color: var(--danger);
+}
+
+.diff-line.reshow {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.empty {
+  color: var(--text-faint);
+  padding: 24px;
+  text-align: center;
+}
+
+/* -------------------------------------------------------------- dialog -- */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 50;
+}
+
+.dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  max-width: 560px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.dialog h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.dialog .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+/* --------------------------------------------------------------- toast -- */
+
+.toasts {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 60;
+  max-width: 460px;
+}
+
+.toast {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 13px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+}
+
+.toast.error {
+  border-left-color: var(--danger);
+  color: var(--danger);
+}
+
+.toast.ok {
+  border-left-color: var(--ok);
+}
+
+.loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-faint);
+}
+
+/* ------------------------------------------------------------- preview -- */
+
+.preview-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.preview-grid > div {
+  flex: 0 0 auto;
+}

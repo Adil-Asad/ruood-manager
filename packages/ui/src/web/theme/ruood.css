@@ -1,0 +1,207 @@
+/*
+ * RUOOD Lab's design tokens, COPIED.
+ *
+ * Copied on purpose, not shared. A component that renders in both React Native
+ * and the DOM would be a dependency between two repositories with different
+ * release cycles, and the thing it would buy — pixel fidelity in a preview — is
+ * not worth a shared package that has to be versioned across an app store
+ * review. The preview is an approximation and says so on screen.
+ *
+ * Source values, from the RUOOD Lab repository:
+ *
+ *   constants/theme.ts    Colors.light / Colors.dark, Fonts.web.sans
+ *   constants/layout.ts   MODAL_CARD_RADIUS 16, MODAL_EDGE_PADDING 16,
+ *                         MODAL_BACKDROP_COLOR rgba(0,0,0,0.5),
+ *                         SCREEN_HORIZONTAL_PADDING 16
+ *   components/confirm-delete-dialog.tsx   title 18, body 14, button 16
+ *
+ * If a colour here ever looks wrong, the app is right and this file is stale.
+ * Everything is scoped under `.ruood` so none of it can leak into the Manager's
+ * own chrome, which is deliberately a different-looking thing.
+ */
+
+.ruood {
+  --ruood-text: #11181c;
+  --ruood-bg: #ffffff;
+  --ruood-tint: #0a7ea4;
+  --ruood-icon: #687076;
+
+  --ruood-card-radius: 16px;
+  --ruood-edge-padding: 16px;
+  --ruood-backdrop: rgba(0, 0, 0, 0.5);
+
+  --ruood-title-size: 18px;
+  --ruood-body-size: 14px;
+  --ruood-button-size: 16px;
+
+  --ruood-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
+    Arial, sans-serif;
+
+  font-family: var(--ruood-sans);
+  color: var(--ruood-text);
+}
+
+/*
+ * The dark palette is a swap of the same token names, not a filter. Both themes
+ * are shown side by side in the preview because an announcement is authored
+ * once and seen in whichever one the user has set.
+ */
+.ruood.dark {
+  --ruood-text: #ecedee;
+  --ruood-bg: #151718;
+  --ruood-tint: #ffffff;
+  --ruood-icon: #9ba1a6;
+}
+
+/* ------------------------------------------------------------- surfaces -- */
+
+.ruood-frame {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--ruood-bg);
+}
+
+.ruood-frame-label {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-faint);
+  padding: 4px 6px;
+  text-align: center;
+}
+
+/* A phone screen behind the announcement, so a modal has something to sit on. */
+.ruood-screen {
+  background: var(--ruood-bg);
+  min-height: 320px;
+  padding: var(--ruood-edge-padding);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ruood-screen.modal-context::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--ruood-backdrop);
+}
+
+/* ---------------------------------------------------------------- modal -- */
+
+.ruood-card {
+  position: relative;
+  background: var(--ruood-bg);
+  border-radius: var(--ruood-card-radius);
+  padding: var(--ruood-edge-padding);
+  width: 100%;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+}
+
+.ruood-image {
+  width: calc(100% + 2 * var(--ruood-edge-padding));
+  margin: calc(-1 * var(--ruood-edge-padding)) 0 12px calc(-1 * var(--ruood-edge-padding));
+  border-top-left-radius: var(--ruood-card-radius);
+  border-top-right-radius: var(--ruood-card-radius);
+  display: block;
+  object-fit: cover;
+}
+
+.ruood-title {
+  font-size: var(--ruood-title-size);
+  font-weight: 600;
+  margin: 0 0 6px;
+  color: var(--ruood-text);
+}
+
+/*
+ * Body text is plain, and rendered as plain text.
+ *
+ * The validator refuses angle brackets and control characters so stored text
+ * can never read as markup — this preview honours that by only ever setting
+ * text, never HTML. `pre-wrap` keeps the operator's own line breaks visible.
+ */
+.ruood-body {
+  font-size: var(--ruood-body-size);
+  line-height: 1.45;
+  margin: 0;
+  color: var(--ruood-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ruood-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.ruood-action {
+  font-size: var(--ruood-button-size);
+  font-weight: 600;
+  color: var(--ruood-tint);
+  background: none;
+  border: 0;
+  padding: 8px 4px;
+  cursor: default;
+}
+
+.ruood-dismiss {
+  font-size: var(--ruood-button-size);
+  color: var(--ruood-icon);
+  background: none;
+  border: 0;
+  padding: 8px 4px;
+  cursor: default;
+}
+
+/* --------------------------------------------------------------- banner -- */
+
+.ruood-banner {
+  width: 100%;
+  align-self: flex-start;
+  background: var(--ruood-bg);
+  border: 1px solid color-mix(in srgb, var(--ruood-icon) 35%, transparent);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.ruood-banner .ruood-title {
+  font-size: 15px;
+}
+
+.ruood-banner .ruood-body {
+  font-size: 13px;
+}
+
+.ruood-banner-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex: 0 0 auto;
+}
+
+/* ---------------------------------------------------------------- inbox -- */
+
+.ruood-inbox-row {
+  width: 100%;
+  align-self: flex-start;
+  border-bottom: 1px solid color-mix(in srgb, var(--ruood-icon) 30%, transparent);
+  padding: 12px 0;
+}
+
+.ruood-inbox-row .ruood-title {
+  font-size: 15px;
+}
+
+.ruood-inbox-row .ruood-body {
+  font-size: 13px;
+  color: var(--ruood-icon);
+}
