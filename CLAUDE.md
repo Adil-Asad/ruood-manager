@@ -4,8 +4,9 @@ Guidance for Claude Code working in this repository.
 
 ## Read this first
 
-**Phases 0 to 5 are complete. Phase 5 is UNCOMMITTED and awaiting review, and
-so is Phase 4 — both were left in the working tree deliberately.**
+**Phases 0 to 5 are complete and committed, in both repositories. The plan ends
+here — there is no Phase 6 written down, so anything further is new scope and
+needs deciding with the operator rather than assuming.**
 
 Phase 4 added `d:\app\modules\announcements\` and eighteen lines across three
 existing RUŌOD Lab files. Nothing else there has been touched, and nothing else
@@ -62,11 +63,13 @@ the decisions here.
 | **2** | Manager UI (Vite + React over `core`) | **Complete** |
 | **3** | Hardening: Ed25519 signing, staging channel, CI validation | **Complete** |
 | **4** | RUŌOD Lab integration: fetcher, eligibility, local state, presenter | **Complete** |
-| **5** | In-app announcement inbox (Settings → Announcements) | **Complete — uncommitted** |
+| **5** | In-app announcement inbox (Settings → Announcements) | **Complete** |
 
-**RUŌOD Lab now contains `modules/announcements/`** plus a mount in
-`app/(tabs)/_layout.tsx`, two dependencies, and a Jest transform rule. Nothing
-else under `d:\app` has been changed, and Phase 5 should keep it that way.
+**RUŌOD Lab now contains `modules/announcements/`.** Everything else Phases 4
+and 5 touched there is small and additive — a mount and the Settings tab icon in
+`app/(tabs)/_layout.tsx`, one section in `modules/settings/screens/settings-screen.tsx`,
+two dependencies, and a Jest transform rule. Nothing else under `d:\app` has been
+changed, and further work should keep it that way.
 
 ## Commands
 
