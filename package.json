@@ -8,8 +8,9 @@
   ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "typecheck": "npm run build && npm run typecheck --workspaces --if-present",
+    "build": "npm run build -w @ruood/announcement-schema && npm run build -w @ruood/announcement-core && npm run build -w @ruood/announcement-cli",
+    "announce": "node packages/cli/dist/bin.js"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

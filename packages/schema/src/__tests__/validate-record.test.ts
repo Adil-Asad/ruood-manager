@@ -546,3 +546,30 @@ describe('deriveLifecycleStatus', () => {
     expect(deriveLifecycleStatus(record, NOW + DAY)).toBe('expired');
   });
 });
+
+describe('editingId excuses a record only for colliding with itself', () => {
+  const registry = { active: ['reports-center-launch'], retired: ['reports-center-launch'] };
+
+  it('still reports a retired id when the record is being edited', () => {
+    // Found by the Phase 1 pipeline tests: skipping the whole availability
+    // check for the record being edited let a retired id return through an
+    // ordinary edit, and a reused id inherits impression counts on every device.
+    const result = validateAnnouncementRecord(authoredRecord(), {
+      now: NOW,
+      mode: 'authored',
+      idRegistry: registry,
+      editingId: 'reports-center-launch',
+    });
+    expect(codes(result)).toContain('id-retired');
+  });
+
+  it('still excuses the duplicate when the id is not retired', () => {
+    const result = validateAnnouncementRecord(authoredRecord(), {
+      now: NOW,
+      mode: 'authored',
+      idRegistry: { active: ['reports-center-launch'], retired: [] },
+      editingId: 'reports-center-launch',
+    });
+    expect(result).toBeClean();
+  });
+});

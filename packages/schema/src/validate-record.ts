@@ -212,10 +212,15 @@ function validateId(
   }
 
   if (mode !== 'authored' || !options.idRegistry) return;
-  if (options.editingId === id) return;
 
   const availability = checkIdAvailable(id as string, options.idRegistry);
   if (availability.available) return;
+
+  // `editingId` excuses a record for colliding with ITSELF — an existing record
+  // is in the registry by definition. It does NOT excuse a retired id, which is
+  // an error whichever record carries it. Skipping the whole check here is what
+  // let a retired id come back in through an ordinary edit.
+  if (availability.reason === 'duplicate' && options.editingId === id) return;
 
   if (availability.reason === 'duplicate') {
     collector.error('id-duplicate', 'id', `The id "${String(id)}" is already in use.`);

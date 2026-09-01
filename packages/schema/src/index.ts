@@ -11,6 +11,7 @@
  */
 
 export * from './constants';
+export * from './canonical';
 export * from './types';
 export * from './routes';
 export * from './issues';

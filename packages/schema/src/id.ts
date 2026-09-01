@@ -63,12 +63,20 @@ export type IdAvailability =
   | { available: true }
   | { available: false; reason: 'duplicate' | 'retired' };
 
+/**
+ * Retired is checked FIRST, and the order matters.
+ *
+ * An id can be both — that is precisely the broken state where a retired id has
+ * been recreated in `content/`. Reporting it as a mere duplicate would offer a
+ * fix (rename one of them) for a condition that has no fix, and would let the
+ * reuse through wherever a duplicate is excused.
+ */
 export function checkIdAvailable(id: string, registry: IdRegistry): IdAvailability {
-  if (registry.active.some((known) => known === id)) {
-    return { available: false, reason: 'duplicate' };
-  }
   if (registry.retired.some((known) => known === id)) {
     return { available: false, reason: 'retired' };
+  }
+  if (registry.active.some((known) => known === id)) {
+    return { available: false, reason: 'duplicate' };
   }
   return { available: true };
 }

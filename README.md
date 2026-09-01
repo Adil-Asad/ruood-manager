@@ -43,8 +43,8 @@ Three rules the design exists to hold:
 | Phase | What | State |
 | --- | --- | --- |
 | **0** | Schema, validator, id rules, version comparison | **Complete** |
-| 1 | CLI + announcements repository: build, image pipeline, git publish | Not started |
-| 2 | Manager UI (Vite + React) | Not started |
+| **1** | CLI + core: build, image pipeline, git publish, diff, revert | **Complete** |
+| 2 | Manager UI (Vite + React) | **Next** |
 | 3 | Hardening: Ed25519 signing, staging channel, CI validation | Not started |
 | 4 | RUOOD Lab integration: fetcher, eligibility, local state, presenter | Not started |
 | 5 | In-app announcement inbox | Not started |
@@ -57,8 +57,8 @@ Nothing in RUOOD Lab has been modified, and nothing will be until Phase 4.
 packages/
   schema/     @ruood/announcement-schema — the contract. Zero dependencies,
               platform-neutral, node-testable. Ships into RUOOD Lab's bundle.
-  core/       (Phase 1) build, image pipeline, git publish
-  cli/        (Phase 1) validate | build | publish | revert | status
+  core/       build, image pipeline, git publish, diff, revert
+  cli/        announce: init | new | image | activate | publish | revert | ...
   ui/         (Phase 2) the local web UI
 workspace/    (Phase 1) the cloned announcements repo — gitignored
 docs/         architecture and schema reference
@@ -81,10 +81,11 @@ A full check before calling work done:
 npm run typecheck && npm test && npm run build
 ```
 
-Currently **255 tests across 7 suites**, all in `packages/schema`.
+Currently **377 tests across 12 suites** — 279 schema, 98 core, 25 cli.
 
 ## Reading order
 
-1. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the decisions and why.
-2. [docs/SCHEMA.md](docs/SCHEMA.md) — every field, every rule.
-3. `packages/schema/src/types.ts` — the contract itself.
+1. [CLAUDE.md](CLAUDE.md) — the working brief, invariants, and what is next.
+2. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the decisions and why.
+3. [docs/SCHEMA.md](docs/SCHEMA.md) — every field, every rule.
+4. `packages/schema/src/types.ts` — the contract itself.

@@ -37,6 +37,14 @@ describe('the envelope', () => {
     }
   });
 
+  it('accepts revision 0, the empty manifest a new repository publishes', () => {
+    expect(check(manifest([], { revision: 0 })).ok).toBe(true);
+  });
+
+  it('rejects a negative revision', () => {
+    expect(codes(check(manifest([], { revision: -1 })))).toContain('wrong-type');
+  });
+
   it('rejects a schema version this build cannot read', () => {
     expect(codes(check(manifest([], { schemaVersion: 2 })))).toContain(
       'schema-version-unsupported',

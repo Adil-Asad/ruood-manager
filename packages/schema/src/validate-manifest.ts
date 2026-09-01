@@ -144,8 +144,11 @@ function validateRevision(
   const revision = manifest.revision;
   if (revision === undefined) {
     collector.error('missing-field', 'revision', 'revision is required.');
-  } else if (typeof revision !== 'number' || !Number.isInteger(revision) || revision < 1) {
-    collector.error('wrong-type', 'revision', 'revision must be a positive integer.');
+  } else if (typeof revision !== 'number' || !Number.isInteger(revision) || revision < 0) {
+    // Zero is legal and meaningful: it is the empty manifest a freshly created
+    // repository publishes, so that a client fetching before the first real
+    // publish reads a well-formed file rather than a 404.
+    collector.error('wrong-type', 'revision', 'revision must be a non-negative integer.');
   }
 }
 

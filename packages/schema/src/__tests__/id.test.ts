@@ -65,6 +65,15 @@ describe('checkIdAvailable', () => {
     });
   });
 
+  it('reports retired first when an id is somehow both', () => {
+    // The broken state: a retired id recreated in content/. Calling it a mere
+    // duplicate would offer a rename as the fix for something that has none.
+    expect(checkIdAvailable('both', { active: ['both'], retired: ['both'] })).toEqual({
+      available: false,
+      reason: 'retired',
+    });
+  });
+
   it('distinguishes duplicate from retired, because the fix differs', () => {
     const duplicate = checkIdAvailable('backup-reminder', registry);
     const retired = checkIdAvailable('old-notice', registry);
