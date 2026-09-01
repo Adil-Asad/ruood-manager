@@ -46,7 +46,7 @@ import {
 } from './constants';
 import { IssueCollector, type ValidationResult } from './issues';
 import { checkIdAvailable, checkIdFormat, type IdRegistry } from './id';
-import { DAY_MS, daysBetween, instantToEpoch, parseInstant } from './instant';
+import { daysBetween, instantToEpoch, parseInstant } from './instant';
 import { isRangeSatisfiable, isVersion } from './semver';
 import {
   EXTERNAL_HOST_ALLOWLIST,
@@ -814,4 +814,3 @@ export function deriveLifecycleStatus(
   return 'active';
 }
 
-export { DAY_MS };

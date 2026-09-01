@@ -11,6 +11,8 @@
     "typecheck": "npm run build && npm run typecheck --workspaces --if-present",
     "build": "npm run build -w @ruood/announcement-schema && npm run build -w @ruood/announcement-core && npm run build -w @ruood/announcement-cli && npm run build -w @ruood/announcement-ui",
     "announce": "node packages/cli/dist/bin.js",
+    "schema:sync": "node scripts/sync-schema.mjs",
+    "schema:check": "node scripts/sync-schema.mjs --check",
     "ui": "node packages/ui/dist/server/bin.js",
     "ui:api": "node packages/ui/dist/server/bin.js --dev",
     "ui:web": "npm run dev -w @ruood/announcement-ui"

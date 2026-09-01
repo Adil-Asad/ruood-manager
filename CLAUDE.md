@@ -4,11 +4,12 @@ Guidance for Claude Code working in this repository.
 
 ## Read this first
 
-**Phases 0 to 3 are complete and approved. The next task is Phase 4 (RUŌOD Lab
-integration), and it needs the operator's go-ahead before you start.**
+**Phases 0 to 4 are complete and approved. The next task is Phase 5 (the in-app
+announcement inbox), and it needs the operator's go-ahead before you start.**
 
-Phase 4 is the first phase that touches `d:\app`. Nothing there has been
-modified yet, and nothing may be until that go-ahead.
+Phase 4 added `d:\app\modules\announcements\` and eighteen lines across three
+existing RUŌOD Lab files. Nothing else there has been touched, and nothing else
+may be.
 
 This project was designed and built in a previous session that ran from the
 RUŌOD Lab folder (`d:\app`). That session produced an architecture review, then
@@ -60,11 +61,12 @@ the decisions here.
 | **1** | CLI + core: build, image pipeline, git publish, diff, revert | **Complete** |
 | **2** | Manager UI (Vite + React over `core`) | **Complete** |
 | **3** | Hardening: Ed25519 signing, staging channel, CI validation | **Complete** |
-| **4** | RUŌOD Lab integration: fetcher, eligibility, local state, presenter | **NEXT — needs approval** |
-| 5 | In-app announcement inbox (Settings → Announcements) | Not started |
+| **4** | RUŌOD Lab integration: fetcher, eligibility, local state, presenter | **Complete** |
+| **5** | In-app announcement inbox (Settings → Announcements) | **NEXT — needs approval** |
 
-**Nothing in RUŌOD Lab has been modified, and nothing may be until Phase 4.**
-Do not create or change files under `d:\app`.
+**RUŌOD Lab now contains `modules/announcements/`** plus a mount in
+`app/(tabs)/_layout.tsx`, two dependencies, and a Jest transform rule. Nothing
+else under `d:\app` has been changed, and Phase 5 should keep it that way.
 
 ## Commands
 
@@ -100,6 +102,9 @@ npm run build && npm test && npm run typecheck
 
 Currently **557 tests across 17 suites** — 306 schema, 159 core, 43 cli, 49 ui.
 Each package's suite is counted in its own run; `npm test` runs all four.
+
+RUŌOD Lab has **97 announcement tests across 5 suites** of its own, run there
+with `npx jest modules/announcements`.
 
 **Build order is load-bearing.** `core`, `cli` and the `ui` server resolve
 `@ruood/announcement-schema` through its built `dist/*.d.ts`, not its source, so
@@ -330,6 +335,68 @@ quietly permissive.
 Revision 0 is the scaffolded placeholder and is skipped by both CI and
 `announce verify`. A build always increments, so nothing else can be 0.
 
+### RUŌOD Lab carries a COPY of the schema, and it is checked
+
+`d:\app\modules\announcements\schema/` is `packages/schema/src` verbatim,
+copied by `scripts/sync-schema.mjs` and carrying a generated header.
+
+Copied rather than depended on, because RUŌOD Lab is a separate repository that
+builds on EAS where this workspace does not exist: a `file:` dependency resolves
+on one machine and nowhere else, and the package is not published. "One
+validator, two consumers" survives because the copy is byte-identical:
+
+```bash
+npm run schema:check -- --to d:/app/modules/announcements/schema   # before shipping
+npm run schema:sync  -- --to d:/app/modules/announcements/schema   # after a change
+```
+
+Run the check whenever the schema changes. The one way this arrangement fails is
+somebody editing the copy.
+
+### The app's crypto is injected, and only verifies
+
+`@noble/ed25519` with `@noble/hashes` for SHA-512, both pure JavaScript with no
+dependencies and nothing native. The **synchronous** path, because Hermes has no
+`crypto.subtle` and noble's async API reaches for it. Verification only — no key
+generation, no signing, so no secure random source is needed.
+
+`modules/announcements/__tests__/verifier.test.ts` deletes `globalThis.crypto`
+for its whole run and signs with `node:crypto`, so it proves the two
+implementations agree about the covered bytes rather than proving the plumbing.
+
+### Nothing in the app is on the startup path
+
+`useAnnouncements` does nothing until `isAppReady`, then waits for
+`InteractionManager.runAfterInteractions`, then reads one key and fetches.
+Never awaited by anything. `AnnouncementHost` is mounted beside `AppModalHost` —
+NOT in the provider stack, because it has no dependents — and wraps itself in an
+error boundary that drops the presenter for the session rather than letting a
+render error reach the tab tree.
+
+Every layer below returns values instead of throwing. The boundary is there
+because "an announcement broke RUŌOD Lab" is the one outcome the whole design
+exists to make impossible.
+
+### The app's storage key is `@perfumery/announcements`
+
+Under that prefix deliberately: `use-factory-reset.ts` already sweeps
+`@perfumery/`, so "Factory Reset clears announcements and they re-show" holds
+with no wiring and no special case anyone has to remember. It is equally
+deliberately absent from the backup's explicit key list — announcement state is
+device-and-session shaped, like OAuth tokens and the undo history.
+
+### Sub-targets land on their parent tab
+
+Nine of the fourteen `ROUTE_TARGETS` name things that are not routes. Reports,
+Data Management, Backup, Units and the rest are `useState` flags inside
+`ToolsScreen` and `SettingsScreen` that open an in-tree modal, so there is
+nothing to navigate to.
+
+`modules/announcements/navigation.ts` maps each of them to the tab that owns it.
+Opening them properly would mean teaching both screens to accept an external
+"open this" signal — a change to two large screens that have nothing to do with
+announcements, and one to make deliberately rather than as a side effect.
+
 ## Where the complexity lives
 
 | File | What |
@@ -347,6 +414,18 @@ Revision 0 is the scaffolded placeholder and is skipped by both CI and
 | `packages/schema/src/signing.ts` | What a signature covers, and what a verdict means |
 | `packages/core/src/signing/keys.ts` | Making a key, and keeping it out of a repository |
 | `packages/core/src/ci/files.ts` | The dependency-free check CI runs in the announcements repo |
+
+In RUŌOD Lab (`d:\app\modules\announcements/`):
+
+| File | What |
+| --- | --- |
+| `eligibility.ts` | Pure. Which announcement may be shown, and why one may not |
+| `state.ts` | Pure. The one storage key, and the 60-day retention rule |
+| `fetcher.ts` | Conditional GET, the 6-hour window, a raced timeout |
+| `service.ts` | fetch → verify → store, in that order, never the reverse |
+| `verifier.ts` | Ed25519 for Hermes, and the two encoders it needs |
+| `navigation.ts` | The closed target table, and where each one actually lands |
+| `use-announcements.ts` | Off the startup path, and never awaited |
 
 Two things in `git/repository.ts` are non-obvious and were bugs once:
 

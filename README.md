@@ -46,10 +46,16 @@ Three rules the design exists to hold:
 | **1** | CLI + core: build, image pipeline, git publish, diff, revert | **Complete** |
 | **2** | Manager UI (Vite + React over `core`) | **Complete** |
 | **3** | Hardening: Ed25519 signing, staging channel, CI validation | **Complete** |
-| 4 | RUOOD Lab integration: fetcher, eligibility, local state, presenter | **Next** |
-| 5 | In-app announcement inbox | Not started |
+| **4** | RUOOD Lab integration: fetcher, eligibility, local state, presenter | **Complete** |
+| 5 | In-app announcement inbox | **Next** |
 
-Nothing in RUOOD Lab has been modified, and nothing will be until Phase 4.
+RUOOD Lab now contains `modules/announcements/`, which carries a checked copy
+of the schema package:
+
+```bash
+npm run schema:check -- --to d:/app/modules/announcements/schema
+npm run schema:sync  -- --to d:/app/modules/announcements/schema
+```
 
 ## Layout
 
