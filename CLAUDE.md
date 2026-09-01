@@ -8,10 +8,6 @@ Guidance for Claude Code working in this repository.
 here — there is no Phase 6 written down, so anything further is new scope and
 needs deciding with the operator rather than assuming.**
 
-Phase 4 added `d:\app\modules\announcements\` and eighteen lines across three
-existing RUŌOD Lab files. Nothing else there has been touched, and nothing else
-may be.
-
 This project was designed and built in a previous session that ran from the
 RUŌOD Lab folder (`d:\app`). That session produced an architecture review, then
 Phase 0, then Phase 1. Everything decided there is written down here and in
@@ -103,7 +99,7 @@ A full check before calling work done:
 npm run build && npm test && npm run typecheck
 ```
 
-Currently **557 tests across 17 suites** — 306 schema, 159 core, 43 cli, 49 ui.
+Currently **564 tests across 18 suites** — 313 schema, 159 core, 43 cli, 49 ui.
 Each package's suite is counted in its own run; `npm test` runs all four.
 
 RUŌOD Lab has **164 announcement tests across 8 suites** of its own, run there
