@@ -4,8 +4,8 @@ Guidance for Claude Code working in this repository.
 
 ## Read this first
 
-**Phases 0 to 4 are complete and approved. The next task is Phase 5 (the in-app
-announcement inbox), and it needs the operator's go-ahead before you start.**
+**Phases 0 to 5 are complete. Phase 5 is UNCOMMITTED and awaiting review, and
+so is Phase 4 — both were left in the working tree deliberately.**
 
 Phase 4 added `d:\app\modules\announcements\` and eighteen lines across three
 existing RUŌOD Lab files. Nothing else there has been touched, and nothing else
@@ -62,7 +62,7 @@ the decisions here.
 | **2** | Manager UI (Vite + React over `core`) | **Complete** |
 | **3** | Hardening: Ed25519 signing, staging channel, CI validation | **Complete** |
 | **4** | RUŌOD Lab integration: fetcher, eligibility, local state, presenter | **Complete** |
-| **5** | In-app announcement inbox (Settings → Announcements) | **NEXT — needs approval** |
+| **5** | In-app announcement inbox (Settings → Announcements) | **Complete — uncommitted** |
 
 **RUŌOD Lab now contains `modules/announcements/`** plus a mount in
 `app/(tabs)/_layout.tsx`, two dependencies, and a Jest transform rule. Nothing
@@ -103,8 +103,8 @@ npm run build && npm test && npm run typecheck
 Currently **557 tests across 17 suites** — 306 schema, 159 core, 43 cli, 49 ui.
 Each package's suite is counted in its own run; `npm test` runs all four.
 
-RUŌOD Lab has **97 announcement tests across 5 suites** of its own, run there
-with `npx jest modules/announcements`.
+RUŌOD Lab has **164 announcement tests across 8 suites** of its own, run there
+with `npx jest modules/announcements`. Its full suite is 1449 across 59.
 
 **Build order is load-bearing.** `core`, `cli` and the `ui` server resolve
 `@ruood/announcement-schema` through its built `dist/*.d.ts`, not its source, so
@@ -397,6 +397,66 @@ Opening them properly would mean teaching both screens to accept an external
 "open this" signal — a change to two large screens that have nothing to do with
 announcements, and one to make deliberately rather than as a side effect.
 
+### Active and passive delivery is `surface`, and no other field
+
+Phase 5 needed an authoring control for "may interrupt" versus "inbox only".
+The contract already had one, so **nothing was added to the schema**:
+
+| `surface` | Delivery | What happens |
+| --- | --- | --- |
+| `modal` | Active | a dialog, at most one per session, and in the inbox |
+| `banner` | Active | an inline notice, never blocks, and in the inbox |
+| `inbox` | Passive | the inbox only — `isEligible` refuses to present it |
+
+A `passive` boolean beside `surface` would be a second field expressing the same
+fact and free to disagree with it, and every consumer would then have to decide
+which one wins. `packages/schema/src/__tests__/delivery.test.ts` pins this;
+`packages/ui/src/web/delivery.ts` is only how the Manager says it in words.
+
+### The inbox is history; the presenter is attention
+
+They are separate concerns and separate state, keyed by the same id:
+
+```
+seen[id]     impressions, dismissal   → the presenter's frequency rules
+inbox[id]    content, readAt          → what the user sees and has read
+```
+
+Neither is derivable from the other, which is why both exist. Dismissing the
+presenter records a dismissal and removes nothing. Expiry, a revert and a remote
+deletion all leave the inbox entry alone — remote lifecycle is not a request to
+forget local history. There is no user-facing delete.
+
+Being presented **does** mark the entry read, because being shown the content is
+having read it. Dismissal never marks anything read on its own.
+
+### One unread derivation, never a stored count
+
+`InboxEntry.readAt` is the only unread state. Both indicators — the Settings tab
+dot and the Announcements row dot — call the same `hasUnread` over the same
+array, through `modules/announcements/inbox-store.ts`. A stored count is exactly
+how two indicators end up disagreeing, so there is none.
+
+The store is a module-level `useSyncExternalStore`, matching `AppModalHost`'s
+own pattern, so the tab bar can read it without every screen re-rendering.
+
+### The inbox is capped at 200, and protects unread items
+
+`enforceRetention` evicts the **oldest read** entry while any read entry exists,
+and only falls back to the oldest entry at all when every one of the 200 is
+unread. Ties break on id, so the same inbox always evicts the same thing on
+every device. The cap is applied on write and on read.
+
+It is a **local storage limit only**. It never deletes, archives or deactivates
+anything in the Manager or the repository.
+
+### The app's state is v2, and v1 is migrated
+
+Adding the inbox bumped `STATE_VERSION`. Phase 4 state is migrated rather than
+discarded: reading v1 as unrecognised would empty `seen`, and an empty `seen`
+re-shows every announcement to everyone who upgrades — the exact failure the
+whole system exists to prevent.
+
 ## Where the complexity lives
 
 | File | What |
@@ -426,6 +486,8 @@ In RUŌOD Lab (`d:\app\modules\announcements/`):
 | `verifier.ts` | Ed25519 for Hermes, and the two encoders it needs |
 | `navigation.ts` | The closed target table, and where each one actually lands |
 | `use-announcements.ts` | Off the startup path, and never awaited |
+| `inbox.ts` | Pure. The 200-item cap, and which entry it is safe to evict |
+| `inbox-store.ts` | The one unread derivation both indicators read |
 
 Two things in `git/repository.ts` are non-obvious and were bugs once:
 

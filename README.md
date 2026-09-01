@@ -47,7 +47,7 @@ Three rules the design exists to hold:
 | **2** | Manager UI (Vite + React over `core`) | **Complete** |
 | **3** | Hardening: Ed25519 signing, staging channel, CI validation | **Complete** |
 | **4** | RUOOD Lab integration: fetcher, eligibility, local state, presenter | **Complete** |
-| 5 | In-app announcement inbox | **Next** |
+| **5** | In-app announcement inbox (Settings → Announcements) | **Complete** |
 
 RUOOD Lab now contains `modules/announcements/`, which carries a checked copy
 of the schema package:
@@ -101,7 +101,7 @@ A full check before calling work done:
 npm run typecheck && npm test && npm run build
 ```
 
-Currently **557 tests across 17 suites** — 306 schema, 159 core, 43 cli, 49 ui.
+Currently **564 tests across 18 suites** — 313 schema, 159 core, 43 cli, 49 ui.
 
 ## Reading order
 

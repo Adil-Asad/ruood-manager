@@ -53,6 +53,7 @@ import type { RecordDetail, Transition } from '../../shared/api';
 import { useManager } from '../app';
 import { Badge, Button, Callout, Card, Dialog, Field, Issues } from '../components/ui';
 import { Preview } from '../components/preview';
+import { deliveryFor } from '../delivery';
 import {
   formatBytes,
   formatInstant,
@@ -426,6 +427,8 @@ function DisplayCard({
   const setDisplay = (changes: Partial<AuthoredAnnouncement['display']>): void =>
     patch({ display: { ...draft.display, ...changes } });
 
+  const delivery = deliveryFor(draft.display.surface);
+
   return (
     <Card>
       <h3>Display</h3>
@@ -434,9 +437,23 @@ function DisplayCard({
         means — mixing them into one setting is what made an earlier design half nonsense.
       </p>
 
+      {/* `surface` IS the active/passive decision — there is no separate flag,
+          because a second field saying the same thing is a second field that
+          can disagree. This just says out loud what choosing it does. */}
+      <Callout
+        kind={delivery.kind === 'passive' ? 'info' : 'warn'}
+        title={
+          delivery.kind === 'passive'
+            ? 'Passive — this will never interrupt anyone'
+            : 'Active — this may interrupt the user'
+        }
+      >
+        {delivery.detail}
+      </Callout>
+
       <div className="row" style={{ marginTop: 12 }}>
         <Field
-          label="Surface"
+          label="Surface — how it is delivered"
           hint={
             draft.display.surface === 'modal'
               ? 'A blocking dialog. At most one per session.'
@@ -451,7 +468,7 @@ function DisplayCard({
           >
             {SURFACES.map((value) => (
               <option key={value} value={value}>
-                {value}
+                {value} — {deliveryFor(value).label.toLowerCase()}
               </option>
             ))}
           </select>
@@ -477,6 +494,13 @@ function DisplayCard({
           </select>
         </Field>
       </div>
+
+      {delivery.kind === 'passive' ? (
+        <p className="field-note">
+          The settings below govern how the presenter interrupts, and a passive announcement
+          never does — they are recorded but have no effect until the surface changes.
+        </p>
+      ) : null}
 
       <div className="row">
         <Field label="Max impressions" hint="Total times it may ever be shown on one device.">

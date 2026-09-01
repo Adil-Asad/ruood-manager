@@ -26,6 +26,7 @@ import { api } from '../api';
 import type { IdCheckResponse, ManagerState, RecordSummary } from '../../shared/api';
 import { useManager } from '../app';
 import { Badge, Button, Card, Dialog, Empty, Field } from '../components/ui';
+import { deliveryFor } from '../delivery';
 import { formatWindow } from '../format';
 
 const ORDER: LifecycleStatus[] = ['active', 'scheduled', 'paused', 'draft', 'expired', 'archived'];
@@ -100,7 +101,7 @@ export function RecordsScreen({ state }: { state: ManagerState }): JSX.Element {
               <th>Id</th>
               <th>Title</th>
               <th>Rev</th>
-              <th>Surface</th>
+              <th>Delivery</th>
               <th>Pri</th>
               <th>Window</th>
               <th />
@@ -128,7 +129,11 @@ function Row({ record, onOpen }: { record: RecordSummary; onOpen: () => void }):
       <td className="mono">{record.id}</td>
       <td>{record.title}</td>
       <td className="mono">r{record.rev}</td>
-      <td>{record.surface}</td>
+      <td>
+        {record.surface}
+        <br />
+        <span className="hint">{deliveryFor(record.surface).label}</span>
+      </td>
       <td className="mono">{record.priority}</td>
       <td className="mono">{formatWindow(record.startAt, record.endAt)}</td>
       <td>
