@@ -195,16 +195,52 @@ export async function loadSigningKey(keyPath: string): Promise<SigningKey> {
     );
   }
 
+  return signingKeyFromPem(await readFile(target, 'utf8'), target);
+}
+
+/**
+ * The environment variable a CI run supplies the key through.
+ *
+ * Publishing moved into a GitHub Actions workflow, and a workflow's secret
+ * arrives in the environment. Writing it to a file first would work — a runner
+ * is an ephemeral VM — but it would leave the key on a disk for the length of
+ * the job, and in a temporary file that a later step, or a compromised action,
+ * could read. Taking it from the environment keeps it in one process.
+ */
+export const SIGNING_KEY_ENV = 'ANNOUNCEMENT_SIGNING_KEY';
+
+/**
+ * The key from the environment, or `null` when it is not set.
+ *
+ * `null` rather than a throw: not having it set is the ordinary case for every
+ * local run, and only the caller knows whether that is a problem.
+ */
+export function signingKeyFromEnvironment(
+  environment: Record<string, string | undefined>,
+): SigningKey | null {
+  const pem = environment[SIGNING_KEY_ENV];
+  if (!pem || pem.trim().length === 0) return null;
+
+  return signingKeyFromPem(pem, `$${SIGNING_KEY_ENV}`);
+}
+
+/**
+ * A PEM private key, checked and turned into a `SigningKey`.
+ *
+ * `source` names where it came from, so the message says "$ANNOUNCEMENT_SIGNING_KEY
+ * is not a readable private key" rather than naming a path that does not exist.
+ */
+export function signingKeyFromPem(pem: string, source: string): SigningKey {
   let privateKey: KeyObject;
   try {
-    privateKey = createPrivateKey(await readFile(target, 'utf8'));
+    privateKey = createPrivateKey(pem);
   } catch (error) {
-    throw new SigningKeyError(`${target} is not a readable private key: ${(error as Error).message}`);
+    throw new SigningKeyError(`${source} is not a readable private key: ${(error as Error).message}`);
   }
 
   if (privateKey.asymmetricKeyType !== 'ed25519') {
     throw new SigningKeyError(
-      `${target} is a ${privateKey.asymmetricKeyType ?? 'unknown'} key; announcements are ` +
+      `${source} is a ${privateKey.asymmetricKeyType ?? 'unknown'} key; announcements are ` +
         `signed with ${SIGNING_ALGORITHM}.`,
     );
   }

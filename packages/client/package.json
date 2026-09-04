@@ -1,0 +1,21 @@
+{
+  "name": "@ruood/announcement-client",
+  "version": "0.1.0",
+  "description": "The platform-neutral plumbing: the HTTP port, the credential store port, base64, and the pure presentation helpers. Runs unchanged in a browser, in Hermes and in node.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@ruood/announcement-schema": "0.1.0"
+  },
+  "sideEffects": false
+}

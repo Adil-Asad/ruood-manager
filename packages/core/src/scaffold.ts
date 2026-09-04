@@ -16,6 +16,7 @@ import { canonicalJson } from '@ruood/announcement-schema';
 import { AnnouncementRepo } from './git/repository';
 import { repoPaths, type RepoPaths } from './paths';
 import { CI_SCRIPT, CI_SCRIPT_FILE, CI_WORKFLOW, CI_WORKFLOW_FILE } from './ci/files';
+import { PUBLISH_WORKFLOW_FILE, publishWorkflow } from './ci/publish-workflow';
 
 export interface ScaffoldResult {
   paths: RepoPaths;
@@ -31,7 +32,46 @@ export interface ScaffoldResult {
   nestedInsideRepository: boolean;
 }
 
-export async function scaffoldRepository(root: string): Promise<ScaffoldResult> {
+/**
+ * Where the publishing toolchain is checked out from.
+ *
+ * Defaults rather than requirements, so `announce init` still takes one
+ * argument. Both are overridable because a fork, or a pinned upgrade, is a
+ * normal thing to want — and the ref especially: leaving it on a branch would
+ * mean a change in the Manager repository silently changing what every publish
+ * signs.
+ */
+export const DEFAULT_MANAGER_REPOSITORY = 'Adil-Asad/ruood-manager';
+
+/**
+ * A TAG, and never a branch.
+ *
+ * This defaulted to `main`, directly underneath the paragraph explaining why a
+ * branch is wrong — so `announce init` scaffolded exactly the arrangement the
+ * rest of this file exists to prevent, and nothing failed: every generated
+ * workflow would have tracked whatever the Manager's default branch happened to
+ * contain at the moment of each publish, silently changing what gets signed.
+ *
+ * The tests did not catch it because they all pass `managerRef` explicitly.
+ * They now assert the default itself.
+ *
+ * A tag that does not exist yet fails loudly, in CI, naming the missing ref.
+ * That is strictly better than a branch that always resolves and is always a
+ * moving target.
+ */
+export const DEFAULT_MANAGER_REF = 'v1.0.0';
+
+export interface ScaffoldOptions {
+  /** `owner/repo` of the Manager repository. */
+  managerRepository?: string;
+  /** The ref to pin the toolchain at. A tag or a sha; never a moving branch. */
+  managerRef?: string;
+}
+
+export async function scaffoldRepository(
+  root: string,
+  options?: ScaffoldOptions,
+): Promise<ScaffoldResult> {
   const paths = repoPaths(root);
   const created: string[] = [];
   const alreadyExisted = existsSync(paths.content);
@@ -64,6 +104,19 @@ export async function scaffoldRepository(root: string): Promise<ScaffoldResult> 
   // catch is a commit the Manager did not produce.
   await writeOnce(join(root, CI_WORKFLOW_FILE), CI_WORKFLOW, created);
   await writeOnce(join(root, CI_SCRIPT_FILE), CI_SCRIPT, created);
+
+  // And the workflow that PUBLISHES: the Manager app writes `content/` over the
+  // GitHub API, and this is what turns that into a signed `dist/`. It checks
+  // the Manager repository out as a build tool at a pinned ref — a dependency
+  // in one direction, so neither repository ends up inside the other.
+  await writeOnce(
+    join(root, PUBLISH_WORKFLOW_FILE),
+    publishWorkflow({
+      managerRepository: options?.managerRepository ?? DEFAULT_MANAGER_REPOSITORY,
+      managerRef: options?.managerRef ?? DEFAULT_MANAGER_REF,
+    }),
+    created,
+  );
 
   // An empty but VALID manifest, so a client fetching before the first publish
   // gets a well-formed file rather than a 404 it has to treat as an error.

@@ -154,6 +154,28 @@ export interface AnnouncementImage {
   bytes: number;
   sha256: string;
   alt: string;
+
+  /**
+   * Whether this `.webp` holds more than one frame.
+   *
+   * Optional, and absent means still — which is what every image published
+   * before animation existed is, so nothing had to be rewritten.
+   *
+   * It is here rather than left to the decoder because the VALIDATOR needs it:
+   * an animation is allowed a larger byte budget than a still, and the rule
+   * that picks between the two caps runs over the manifest without ever seeing
+   * the image bytes. A renderer does not need the field at all — `expo-image`
+   * sniffs the file — so this is not a display hint, it is the fact that makes
+   * `image.bytes` checkable.
+   *
+   * It is NOT authored. `encodeAnnouncementImage` stamps what it actually
+   * produced, so the flag cannot disagree with the file: a record claiming
+   * `animated: true` over a still image would simply be granted a budget it has
+   * no use for, and one claiming `false` over an animation would be refused by
+   * the still cap. Derived, never stored by hand — the same discipline as
+   * `width` and `sha256` beside it.
+   */
+  animated?: boolean;
 }
 
 /** A route action: a closed id, resolved by the app. Never a URL. */

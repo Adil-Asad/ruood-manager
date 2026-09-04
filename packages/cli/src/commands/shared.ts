@@ -8,6 +8,7 @@ import {
   loadContent,
   loadPublicKeyRecord,
   loadSigningKey,
+  signingKeyFromEnvironment,
   repoPaths,
   saveRecord,
   type Channel,
@@ -166,6 +167,17 @@ export async function signingKeyFor(
   }
 
   try {
+    // The environment wins over the default path, and only over the DEFAULT:
+    // an explicit `--key` is somebody naming a file, and silently using
+    // something else would be the worst kind of helpful.
+    //
+    // This is how a GitHub Actions run signs. The secret arrives in the
+    // environment and never reaches a disk.
+    if (explicitPath === null) {
+      const fromEnvironment = signingKeyFromEnvironment(process.env);
+      if (fromEnvironment) return fromEnvironment;
+    }
+
     return await loadSigningKey(explicitPath ?? defaultKeyPath());
   } catch (error) {
     ctx.err((error as Error).message);

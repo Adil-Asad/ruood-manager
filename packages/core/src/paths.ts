@@ -25,6 +25,27 @@
 
 import { join } from 'node:path';
 
+import {
+  ANNOUNCEMENTS_DIR,
+  CONTENT_DIR,
+  DIST_DIR,
+  MEDIA_DIR,
+  RETIRED_IDS_FILE,
+  STATE_FILE,
+} from '@ruood/announcement-authoring';
+
+/**
+ * A repository-relative path, as an absolute one.
+ *
+ * The relative names live in `@ruood/announcement-authoring` because the phone
+ * addresses the same files over the GitHub API and cannot import `node:path`.
+ * Composing them here rather than repeating the strings is what keeps "a record
+ * is content/announcements/<id>.json" a single fact.
+ */
+function under(root: string, relative: string): string {
+  return join(root, ...relative.split('/'));
+}
+
 export interface RepoPaths {
   root: string;
   content: string;
@@ -39,16 +60,16 @@ export interface RepoPaths {
 }
 
 export function repoPaths(root: string): RepoPaths {
-  const content = join(root, 'content');
-  const dist = join(root, 'dist');
+  const content = under(root, CONTENT_DIR);
+  const dist = under(root, DIST_DIR);
 
   return {
     root,
     content,
-    announcements: join(content, 'announcements'),
-    media: join(content, 'media'),
-    retiredIds: join(content, 'retired-ids.json'),
-    state: join(content, 'state.json'),
+    announcements: under(root, ANNOUNCEMENTS_DIR),
+    media: under(root, MEDIA_DIR),
+    retiredIds: under(root, RETIRED_IDS_FILE),
+    state: under(root, STATE_FILE),
     dist,
     manifest: join(dist, 'announcements.json'),
     images: join(dist, 'images'),

@@ -1,0 +1,19 @@
+{
+  "name": "@ruood/announcement-github",
+  "version": "0.1.0",
+  "description": "The GitHub half of the Manager: device-flow sign-in, and reading and writing the announcements repository through the Git Data API. Platform-neutral — the transport is injected.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@ruood/announcement-client": "0.1.0",
+    "@ruood/announcement-schema": "0.1.0"
+  },
+  "sideEffects": false
+}

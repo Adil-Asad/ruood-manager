@@ -1,0 +1,18 @@
+{
+  "name": "@ruood/announcement-authoring",
+  "version": "0.1.0",
+  "description": "The pure record operations: creating, editing and transitioning an authored announcement. Platform-neutral, so the phone and the build run identical code.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@ruood/announcement-schema": "0.1.0"
+  },
+  "sideEffects": false
+}

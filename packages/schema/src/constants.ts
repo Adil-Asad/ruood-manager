@@ -98,7 +98,52 @@ export const CLIENT_IMAGE_MAX_BYTES = 500 * 1024;
 export const IMAGE_MAX_DIMENSION = 1080;
 export const IMAGE_MIN_DIMENSION = 16;
 
-/** The one output format. One format means one decode path to reason about. */
+/**
+ * The same two caps again, for an ANIMATED image.
+ *
+ * An animation is the same picture many times over, so holding it to a still
+ * image's budget would not produce a smaller animation — it would refuse every
+ * real one. A separate number is what lets the still cap stay tight (150 KB is
+ * generous for one frame) while animation is possible at all.
+ *
+ * It is a *cap*, not a target. `encodeAnnouncementImage` walks a quality ladder
+ * and stops at the first rung that fits, so a small animation stays small.
+ *
+ * The client cap is larger than the publish cap for the reason it always was:
+ * a legitimately published image must never trip the client's own defence.
+ */
+export const ANIMATED_IMAGE_MAX_BYTES = 600 * 1024;
+export const CLIENT_ANIMATED_IMAGE_MAX_BYTES = 1024 * 1024;
+
+/**
+ * Animation is capped at a smaller long edge than a still.
+ *
+ * Bytes scale with pixels times frames, so 1080px of animation is not a large
+ * image — it is a video with none of a video codec's compression. 640 is enough
+ * for a phone dialog at the width it is actually drawn.
+ */
+export const ANIMATED_IMAGE_MAX_DIMENSION = 640;
+
+/**
+ * The most frames an announcement animation may carry.
+ *
+ * A cap on frames as well as bytes, because the two constrain different
+ * failures: bytes protect the download, frames protect the decode. A 2000-frame
+ * GIF that happens to compress well would still cost every device the memory to
+ * hold the un-optimised strip while it is decoded.
+ */
+export const ANIMATED_IMAGE_MAX_FRAMES = 150;
+
+/**
+ * The one output format, still — and animation did not change that.
+ *
+ * WebP is animated as well as still, so accepting GIF input did not add a
+ * second output format, a second content type, a second decode path in the
+ * client, or a second shape of `IMAGE_PATH_PATTERN`. A GIF is decoded, its
+ * frames re-encoded, and what ships is a `.webp` exactly like every other
+ * image. That is the whole reason animated WebP was chosen over passing GIF
+ * bytes through: one format means one thing to reason about.
+ */
 export const IMAGE_OUTPUT_EXTENSION = '.webp';
 export const IMAGE_CONTENT_TYPE = 'image/webp';
 

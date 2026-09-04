@@ -13,9 +13,15 @@
 export * from './paths';
 export * from './scaffold';
 
-export * from './content/defaults';
-export * from './content/authoring';
-export * from './content/edit';
+/**
+ * The pure record operations now live in `@ruood/announcement-authoring`, so
+ * the phone can run the SAME code the build does. They are re-exported here
+ * unchanged: every existing import of `applyEdits`, `createRecord` or
+ * `applyTransition` from `core` still resolves, and there is still exactly one
+ * definition of each.
+ */
+export * from '@ruood/announcement-authoring';
+
 export * from './content/store';
 
 export * from './build/project';
@@ -24,6 +30,7 @@ export * from './build/build';
 export * from './images/encode';
 export * from './images/attach';
 export * from './ci/files';
+export * from './ci/publish-workflow';
 
 export * from './signing/keys';
 export * from './signing/sign';

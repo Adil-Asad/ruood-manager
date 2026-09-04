@@ -28,6 +28,9 @@ import {
   CATEGORIES,
   DISMISS_BEHAVIOURS,
   IMAGE_ALT_MAX_LENGTH,
+  ANIMATED_IMAGE_MAX_BYTES,
+  ANIMATED_IMAGE_MAX_DIMENSION,
+  ANIMATED_IMAGE_MAX_FRAMES,
   IMAGE_MAX_BYTES,
   IMAGE_MAX_DIMENSION,
   IMAGE_MIN_DIMENSION,
@@ -107,7 +110,7 @@ const DISPLAY_FIELDS = new Set([
   'dismiss',
 ]);
 const TARGETING_FIELDS = new Set(['platforms', 'minVersion', 'maxVersion']);
-const IMAGE_FIELDS = new Set(['path', 'width', 'height', 'bytes', 'sha256', 'alt']);
+const IMAGE_FIELDS = new Set(['path', 'width', 'height', 'bytes', 'sha256', 'alt', 'animated']);
 const ACTION_FIELDS = new Set(['type', 'label', 'target']);
 
 /**
@@ -503,18 +506,31 @@ function validateImage(record: Record<string, unknown>, collector: IssueCollecto
     );
   }
 
+  // Which budget applies. An animation is the same picture many times over, so
+  // holding it to a still image's caps would refuse every real one rather than
+  // producing a smaller one. `animated` is stamped by the encoder from what it
+  // actually produced, never authored, so it cannot disagree with the file.
+  if (fields.animated !== undefined && typeof fields.animated !== 'boolean') {
+    scoped.error('wrong-type', 'animated', 'image.animated must be true or false when present.');
+  }
+
+  const animated = fields.animated === true;
+  const maxDimension = animated ? ANIMATED_IMAGE_MAX_DIMENSION : IMAGE_MAX_DIMENSION;
+  const maxBytes = animated ? ANIMATED_IMAGE_MAX_BYTES : IMAGE_MAX_BYTES;
+
   for (const key of ['width', 'height'] as const) {
     const dimension = fields[key];
     if (!isInteger(dimension)) {
       scoped.error('image-dimension-invalid', key, `image.${key} must be an integer.`);
     } else if (
       (dimension as number) < IMAGE_MIN_DIMENSION ||
-      (dimension as number) > IMAGE_MAX_DIMENSION
+      (dimension as number) > maxDimension
     ) {
       scoped.error(
         'image-dimension-invalid',
         key,
-        `image.${key} must be between ${IMAGE_MIN_DIMENSION} and ${IMAGE_MAX_DIMENSION}.`,
+        `image.${key} must be between ${IMAGE_MIN_DIMENSION} and ${maxDimension}` +
+          `${animated ? ' for an animated image' : ''}.`,
       );
     }
   }
@@ -522,11 +538,12 @@ function validateImage(record: Record<string, unknown>, collector: IssueCollecto
   const bytes = fields.bytes;
   if (!isInteger(bytes) || (bytes as number) < 1) {
     scoped.error('wrong-type', 'bytes', 'image.bytes must be a positive integer.');
-  } else if ((bytes as number) > IMAGE_MAX_BYTES) {
+  } else if ((bytes as number) > maxBytes) {
     scoped.error(
       'image-too-large',
       'bytes',
-      `The image is ${String(bytes)} bytes; the publish limit is ${IMAGE_MAX_BYTES}.`,
+      `The image is ${String(bytes)} bytes; the publish limit is ${maxBytes}` +
+        `${animated ? ` for an animated image (${ANIMATED_IMAGE_MAX_FRAMES} frames maximum)` : ''}.`,
     );
   }
 
