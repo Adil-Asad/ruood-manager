@@ -210,14 +210,14 @@ A full check before calling work done:
 npm run build && npm test && npm run typecheck
 ```
 
-Currently **768 tests across 32 suites** — 313 schema, 149 core, 114 mobile,
+Currently **771 tests across 32 suites** — 313 schema, 152 core, 114 mobile,
 66 github, 59 authoring, 43 cli, 24 client.
 
 Phase 8 added `packages/github` (66 — the device flow against a scripted GitHub,
 and the Git Data API asserted on SHAPE: one commit, `base_tree` present, a
 non-forcing ref update), `packages/authoring` (59 — 46 moved from `core`, plus a
 platform-neutrality sweep), `core/src/__tests__/publish-workflow.test.ts`
-(13 — the generated workflow parsed as YAML, and pinned on the two properties
+(16 — the generated workflow parsed as YAML, and pinned on the two properties
 that make a plain signing secret safe: `contents: write` and no `workflows`),
 `core/src/__tests__/repository-separation.test.ts` (5 — the two repositories
 stay two, asserted structurally because nothing else fails when it stops being
@@ -227,7 +227,7 @@ keeps the editor and the manipulator measuring in the same pixels).
 
 Phase 7 added: `core/src/__tests__/animation.test.ts` (18 — an animated GIF
 survives the pipeline, asserted on the frame count of the OUTPUT bytes) and
-`mobile/src/__tests__/product.test.ts` (39 — the words an administrator reads,
+`mobile/src/__tests__/product.test.ts` (41 — the words an administrator reads,
 and the id they never have to invent). It also added an auth suite to
 `packages/ui`, which went with that package in Phase 8.
 
@@ -242,7 +242,7 @@ ignore. Produce them first when it matters:
 npm run bundle   -w @ruood/announcement-manager-android
 npm run prebuild -w @ruood/announcement-manager-android
 ```
-Each package's suite is counted in its own run; `npm test` runs all six.
+Each package's suite is counted in its own run; `npm test` runs all seven.
 
 **`manifest.test.ts` FAILS rather than skips in one specific window**, and it is
 worth knowing before it wastes an hour: it reads the *merged* AndroidManifest
