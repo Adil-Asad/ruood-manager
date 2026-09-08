@@ -67,8 +67,21 @@ export function humanise(failure: unknown): string {
       return 'GitHub is having trouble right now. Please try again shortly.';
     }
 
-    // Anything else is a message GitHub wrote for a developer.
-    return safe(failure.message);
+    // Anything else gets the generic sentence, and deliberately NOT
+    // `safe(failure.message)`.
+    //
+    // There is no such thing as a GitHubError written for an administrator.
+    // Its message is either GitHub's own API wording ("Reference cannot be
+    // updated", "Invalid request. For 'properties/content', nil is not a
+    // string.") or one of this app's internal invariant messages ("A blob came
+    // back as ... which is not base64"). Both describe machinery.
+    //
+    // `safe()` only rejects what it RECOGNISES as technical, and those two
+    // examples carry no errno, no stack frame, no bare status and no JSON — so
+    // they passed it and would have been printed verbatim on the phone. A word
+    // list can always be one word short; not passing the message through at all
+    // cannot be.
+    return 'Something went wrong. Please try again.';
   }
 
   if (failure instanceof DeviceFlowError) {
@@ -157,6 +170,18 @@ function looksTechnical(message: string): boolean {
     /\b(E[A-Z]{3,}|ENOENT|ECONNREFUSED|EADDRINUSE|ETIMEDOUT)\b/.test(message) ||
     // The system's vocabulary — §33's list of exactly what must not appear.
     /\b(git|commit|manifest|repository|revision|sha256|Ed25519|fastify|sharp|stack|signature|verification|certificate|socket|payload)\b/i.test(
+      message,
+    ) ||
+    // GitHub's own vocabulary, which §33's list predates.
+    //
+    // Phase 8 made GitHub the thing that fails, and its wording is written for
+    // somebody building against the API. Only 401, 403/404, 429 and 5xx are
+    // mapped to sentences; every other status falls through to `safe()`, so a
+    // 422 from creating a blob or a tree — "Invalid request. For
+    // 'properties/content', nil is not a string." — would otherwise reach an
+    // administrator verbatim. None of these words belongs on a screen that
+    // says "New Announcement".
+    /\b(blob|refs?|reference|endpoint|integration|oauth|bad credentials|not accessible)\b/i.test(
       message,
     ) ||
     // A stack frame. `at Object.<anonymous> (index.js:1:1)` has a dot before

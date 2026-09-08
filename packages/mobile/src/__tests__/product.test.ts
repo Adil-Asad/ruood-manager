@@ -16,6 +16,7 @@
  */
 
 import { ApiFailure, ConnectionFailure } from '@ruood/announcement-client';
+import { ConcurrentUpdate, DeviceFlowError, GitHubError } from '@ruood/announcement-github';
 import { ID_MAX_LENGTH, ID_MIN_LENGTH, LIFECYCLE_STATUSES } from '@ruood/announcement-schema';
 
 import {
@@ -316,5 +317,139 @@ describe('file sizes', () => {
     expect(fileSize(512)).toBe('512 B');
     expect(fileSize(420 * 1024)).toBe('420 KB');
     expect(fileSize(Math.round(1.8 * 1024 * 1024))).toBe('1.8 MB');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §25, for the errors Phase 8 actually produces
+// ---------------------------------------------------------------------------
+
+/**
+ * The GitHub failures, swept the same way the `ApiFailure` ones are.
+ *
+ * The sweep above predates Phase 8 and covers `ApiFailure` — the Manager
+ * SERVER's error type, from an architecture that no longer exists. `language.ts`
+ * says of the branches below that they "are now the ones an administrator will
+ * actually hit", and nothing was checking them: a raw GitHub message reaching a
+ * phone would have compiled, typechecked, rendered and passed the whole suite.
+ *
+ * These are the paths a real administrator meets — a revoked token, an
+ * uninstalled app, somebody else editing at the same time — so they get the
+ * same guarantee: a sentence, no status code, no GitHub vocabulary.
+ */
+describe('GitHub failures reach the administrator as product language', () => {
+  /** What GitHub actually puts in a message body, verbatim in shape. */
+  const RAW_GITHUB = [
+    'Bad credentials',
+    'Resource not accessible by integration',
+    'Not Found',
+    'API rate limit exceeded for user ID 12345.',
+    'Server Error',
+    'Reference cannot be updated',
+    'https://docs.github.com/rest/repos/contents#create-or-update-file-contents',
+  ];
+
+  it.each([401, 403, 404, 429, 500, 502, 503])(
+    'never shows the raw status %s to an administrator',
+    (status) => {
+      const shown = humanise(new GitHubError(status, `Request failed with status ${status}`));
+
+      expect(shown).not.toContain(String(status));
+      expect(shown.length).toBeGreaterThan(10);
+      expect(shown).toMatch(/[.!?]$/);
+    },
+  );
+
+  it.each(RAW_GITHUB)('never passes GitHub\u2019s own wording through: %s', (raw) => {
+    // 401 and 403 are mapped to fixed sentences; the point here is that the
+    // GitHub text never survives into what is shown.
+    for (const status of [401, 403, 404, 429, 500]) {
+      expect(humanise(new GitHubError(status, raw))).not.toContain(raw);
+    }
+  });
+
+  it('never leaks developer vocabulary out of a GitHub failure', () => {
+    // The words §25 bans, checked against every mapped GitHub status rather
+    // than against a hand-written example that could be the only one that
+    // passes.
+    const banned = /\b(api|http|endpoint|repository|repo|token|integration|rate limit exceeded|sha|blob|tree|ref|commit)\b/i;
+
+    for (const status of [401, 403, 404, 429, 500, 502, 503]) {
+      const shown = humanise(new GitHubError(status, 'Resource not accessible by integration'));
+      expect(shown).not.toMatch(banned);
+    }
+  });
+
+  it('says a revoked or expired sign-in in words that name the next action', () => {
+    expect(humanise(new GitHubError(401, 'Bad credentials'))).toBe(
+      'Your GitHub sign-in has expired. Please sign in again.',
+    );
+  });
+
+  it('treats 403 and 404 as the same answer, because they are', () => {
+    // A repository somebody cannot see answers 404, not 403. Telling them apart
+    // would be telling them apart wrongly.
+    const forbidden = humanise(new GitHubError(403, 'Resource not accessible by integration'));
+    const missing = humanise(new GitHubError(404, 'Not Found'));
+
+    expect(forbidden).toBe(missing);
+    expect(forbidden).toContain('access');
+  });
+
+  it('explains a concurrent edit without mentioning what a commit is', () => {
+    const shown = humanise(new ConcurrentUpdate());
+
+    expect(shown).not.toMatch(/\b(commit|sha|ref|force|push|merge|conflict)\b/i);
+    expect(shown).toMatch(/[.!?]$/);
+    // It has to say that somebody else changed things, or it is not actionable.
+    expect(shown.toLowerCase()).toContain('changed');
+  });
+
+  it('passes a device-flow sentence through, because it is already written for a person', () => {
+    const shown = humanise(new DeviceFlowError('That code expired. Tap to get a new one.'));
+
+    expect(shown).toBe('That code expired. Tap to get a new one.');
+  });
+});
+
+/**
+ * The status nothing maps, which is where a leak would actually happen.
+ *
+ * `humanise` maps 401, 403/404, 429 and 5xx to sentences. Everything else —
+ * 422 above all, which is what the Git Data API answers when a blob, a tree or
+ * a commit is refused — falls through to `safe()`, and `safe()` shows the
+ * message unless `looksTechnical` recognises it.
+ *
+ * That list was written before Phase 8 and knew nothing about GitHub's
+ * vocabulary, so these messages passed it: they contain no errno, no stack
+ * frame, no bare status and no JSON. They would have been printed on the phone
+ * exactly as GitHub wrote them.
+ */
+describe('an unmapped GitHub status never leaks GitHub\u2019s wording', () => {
+  const UNMAPPED_422 = [
+    "Invalid request. For 'properties/content', nil is not a string.",
+    'Reference cannot be updated',
+    'Reference does not exist',
+    'tree.path contains a malformed path component',
+    'No commit found for SHA: 0000000000000000000000000000000000000000',
+    'Resource not accessible by integration',
+    'Bad credentials',
+  ];
+
+  it.each(UNMAPPED_422)('replaces %s with a sentence', (raw) => {
+    const shown = humanise(new GitHubError(422, raw));
+
+    expect(shown).not.toContain(raw);
+    expect(shown).toBe('Something went wrong. Please try again.');
+  });
+
+  it('still lets the VALIDATOR’s own sentence through, which is a different path', () => {
+    // The gate must not become "hide everything". A validator sentence is
+    // written for a person and is more useful than the generic fallback - but
+    // it arrives as an ApiFailure, not a GitHubError, and that is exactly why
+    // the two are treated differently.
+    const human = 'That image is too large. Please choose a smaller one.';
+
+    expect(humanise(new ApiFailure(422, human))).toBe(human);
   });
 });
