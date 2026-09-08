@@ -132,9 +132,6 @@ jobs:
           npm ci
           npm run build
 
-      # The key arrives in the environment and is never written to disk. The
-      # runner is ephemeral either way, but a file would be readable by every
-      # later step in the job.
       # The publish makes the commit itself, because "publishing is one git
       # commit" is a guarantee of the tool rather than of this file: the
       # manifest and every image land together or not at all. So git has to know
