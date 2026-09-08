@@ -1,7 +1,11 @@
-# The Android Announcement Manager
+# RUOOD Manager for Android
 
-The RUŌOD Announcement Manager as a real Expo/React Native application, built,
-signed and shipped through EAS and Google Play.
+RUŌOD Manager as a real Expo/React Native application, built, signed and
+shipped through EAS and Google Play.
+
+The app is the administration client for RUŌOD Lab. Announcements are its
+first module; the screens are Home, Announcements and Settings rather than
+anything named after the machinery underneath.
 
 This document covers the app: what it is, why it is shaped this way, how to
 build each artefact, and the two things that must never be confused with each

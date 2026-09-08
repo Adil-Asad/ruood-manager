@@ -115,14 +115,21 @@ it. If something seems undecided, it is genuinely undecided: ask.
 
 ## Project
 
-**RUŌOD Announcement Manager** — the authoring, validation and publishing
-tooling for RUŌOD Lab's remote announcements.
+**RUŌOD Manager** — the administration application for RUŌOD Lab, and the
+tooling behind it.
+
+**Announcements are the FIRST MODULE, not the whole product.** The app is a
+general administrative client; announcements are what it currently
+administers. Future modules (subscriptions, and whatever follows) are
+additions beside this one. The naming follows that split: the product is
+RUŌOD Manager, and the packages that are specifically about announcements
+are named for announcements.
 
 ```
         ME
          │
          ▼
-  Announcement Manager  ──▶  announcements repository  ──▶  GitHub Pages
+     RUŌOD Manager      ──▶  announcements repository  ──▶  GitHub Pages
   (this project)              content/  →  dist/                 │
                               one git commit per publish      Internet
                                                                  │
@@ -210,7 +217,7 @@ A full check before calling work done:
 npm run build && npm test && npm run typecheck
 ```
 
-Currently **771 tests across 32 suites** — 313 schema, 152 core, 114 mobile,
+Currently **798 tests across 32 suites** — 313 schema, 152 core, 141 mobile,
 66 github, 59 authoring, 43 cli, 24 client.
 
 Phase 8 added `packages/github` (66 — the device flow against a scripted GitHub,
@@ -440,6 +447,24 @@ app to stop being the product it claims to be.
   `humanise` and asserts none survives. **It caught three real leaks**, including
   `signature verification failed` and a stack-frame pattern that matched the
   frames that never happen and missed the common one.
+
+**A GitHubError never passes its message through, and that was a real leak.**
+`humanise` maps 401, 403/404, 429 and 5xx to sentences; everything else used to
+fall to `safe(failure.message)`. 422 is what the Git Data API answers when a
+blob, a tree or a commit is refused, and its wording carries no errno, no stack
+frame, no bare status and no JSON — so `safe()` did not recognise it and printed
+it. `Reference cannot be updated` and `Invalid request. For
+'properties/content', nil is not a string.` both reached the screen.
+
+There is no such thing as a GitHubError written for an administrator: the
+message is either GitHub's API wording or one of this app's own invariant
+messages. So it is not passed through at all — a word list can always be one
+word short. The validator's sentence still reaches the operator, because that
+arrives as an `ApiFailure`, and that distinction is what the test asserts.
+
+It was missed because `product.test.ts` swept `ApiFailure` — the Manager
+SERVER's error type, from an architecture Phase 8 deleted — and never exercised
+the GitHub errors that replaced it.
 
 The technical detail is relocated, not destroyed: the server still logs exactly
 what happened, and Settings → Advanced still shows the raw values — in a

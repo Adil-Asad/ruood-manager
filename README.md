@@ -1,7 +1,13 @@
-# RUOOD Announcement Manager
+# RUOOD Manager
 
-Authoring, validation and publishing tooling for RUOOD Lab's remote
-announcements.
+The administration application for RUOOD Lab, and the tooling behind it.
+
+**Announcements are its first module.** The product is a general
+administrative client rather than an announcement tool that grew a UI, and
+the shape reflects that: `packages/mobile` is RUOOD Manager, and everything
+announcement-specific lives in packages named for announcements. Later
+modules - subscriptions, and whatever follows - are additions beside this
+one, not a rewrite of it.
 
 This is a **separate project** from RUOOD Lab (`d:\app`). Neither repository
 imports the other. The only thing they will ever share is the
@@ -85,7 +91,7 @@ packages/
               no announcement content and no hard-coded repository.
   cli/        announce: init | new | edit | image | activate | publish | revert | ...
               Also what the publishing workflow runs.
-  mobile/     the Android Announcement Manager — Expo / React Native, a client
+  mobile/     RUOOD Manager for Android — Expo / React Native, a client
               of GitHub. Never holds the signing key.
 workspace/    cloned/scratch announcement repos — gitignored
 docs/         operating guide, architecture, schema reference, Android/EAS
