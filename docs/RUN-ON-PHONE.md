@@ -28,6 +28,27 @@ phone.
 
 There is no development server to start and no machine that has to stay awake.
 
+A preview build needs **four** variables. Three of them are what the app is
+pointed at, and a build given fewer is not broken — it installs, starts, and
+says *"This app has not been set up"* on the sign-in screen, which is the whole
+of the diagnosis:
+
+| | | |
+| --- | --- | --- |
+| `APP_VARIANT` | `preview` | the build badge and the application id |
+| `GITHUB_CLIENT_ID` | `Iv23li...` | which GitHub App signs you in |
+| `ANNOUNCEMENTS_OWNER` | `<owner>` | which repository is managed |
+| `ANNOUNCEMENTS_REPO` | `<repo>` | " |
+
+`ANNOUNCEMENTS_BRANCH` is **optional and normally left unset** — `src/config.ts`
+defaults it to `main`, which is what the publish workflow triggers on. Set it
+only to point a build at a branch nothing publishes.
+
+None of those is a secret. A device-flow client id has no client secret — that
+is why the flow is usable from an APK at all — and the repository is public.
+The announcement signing key is not in this list and never will be: it is a
+secret of the publishing workflow.
+
 ```bash
 # a QA build, installable directly
 GITHUB_CLIENT_ID=Iv23li... ANNOUNCEMENTS_OWNER=<owner> ANNOUNCEMENTS_REPO=<repo> \
@@ -38,14 +59,33 @@ Install the resulting APK. Or, over USB from this checkout:
 
 ```bash
 export APP_VARIANT=preview
-npm run bundle -w @ruood/announcement-manager-android
+export GITHUB_CLIENT_ID=Iv23li...
+export ANNOUNCEMENTS_OWNER=<owner>
+export ANNOUNCEMENTS_REPO=<repo>
+
+npx expo prebuild --platform android --clean
+cd packages/mobile/android && ./gradlew assembleRelease && cd -
 adb install -r packages/mobile/android/app/build/outputs/apk/release/app-release.apk
 ```
 
-`APP_VARIANT` must be **exported**, not set on one command line. `app.config.ts`
-is read twice — once by `prebuild` and once by the bundler Gradle runs — and
-setting it for only the first produces an APK whose build badge disagrees with
-its own application id.
+All four must be **exported**, not set on one command line. `app.config.ts` is
+read twice — once by `prebuild`, which fixes the application id and the launcher
+name, and again by `expo export:embed`, which Gradle runs to produce the bundle
+and the embedded config. They are separate processes with separate
+environments, and setting the variables for only the first produces an APK
+configured differently from its own manifest.
+
+Before installing, read what actually reached the build rather than assuming it:
+
+```bash
+cat packages/mobile/android/app/build/intermediates/assets/release/mergeReleaseAssets/app.config
+```
+
+`extra` must carry `githubClientId`, `announcementsOwner` and
+`announcementsRepo`. If it holds only `appVariant` and `router`, the environment
+did not reach Gradle and reinstalling will not help — `app.config.ts` omits an
+unset key rather than writing an empty string, so an absent key means the
+variable was never set.
 
 ---
 
@@ -128,7 +168,7 @@ node packages/cli/dist/bin.js <command> --repo <path to announcements repo>
 
 | Symptom | Cause |
 | --- | --- |
-| "This app has not been set up" | built without `GITHUB_CLIENT_ID` / repository. A development build can set a client id in **Advanced**; anything else needs a rebuild |
+| "This app has not been set up" | built without `GITHUB_CLIENT_ID`, `ANNOUNCEMENTS_OWNER` or `ANNOUNCEMENTS_REPO`. **Advanced** shows which, under *Announcements repository*. A client id can be set there without rebuilding; the **repository cannot** — it is compiled in deliberately, so a missing owner or repo always needs a rebuild with §1's four variables |
 | Sign-in code expires | codes are short-lived. Tap for a new one |
 | "Someone else changed this first" | the concurrent-edit refusal in §4. Re-read and redo the edit |
 | Published but nothing on the device | check the **Actions** run first, then that RUŌOD Lab's pinned URLs carry the `dist/` prefix |
