@@ -58,8 +58,15 @@ export const DEFAULT_MANAGER_REPOSITORY = 'Adil-Asad/ruood-manager';
  * A tag that does not exist yet fails loudly, in CI, naming the missing ref.
  * That is strictly better than a branch that always resolves and is always a
  * moving target.
+ *
+ * `v1.0.1` rather than `v1.0.0` because v1.0.0 cannot publish on a Linux
+ * runner: its `package-lock.json` was generated on Windows and carried only
+ * `@img/sharp-win32-x64`, so `npm ci` gave the runner sharp's JavaScript and
+ * none of its native libvips. A repository scaffolded against it would be born
+ * unable to publish, and the failure arrives late — `npm ci` and the build both
+ * succeed, and only the image step says so.
  */
-export const DEFAULT_MANAGER_REF = 'v1.0.0';
+export const DEFAULT_MANAGER_REF = 'v1.0.1';
 
 export interface ScaffoldOptions {
   /** `owner/repo` of the Manager repository. */
