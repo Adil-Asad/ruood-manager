@@ -71,6 +71,69 @@ export function ratioById(id: RatioId): Ratio {
   return RATIOS.find((ratio) => ratio.id === id) ?? RATIOS[1]!;
 }
 
+/**
+ * How much room the message has left, once the picture has taken its share.
+ *
+ * A dialog on a phone is one screen. The taller the frame, the less of that
+ * screen is left for words — and 500 characters under a Full-screen picture is
+ * a dialog the reader scrolls twice to get through, which is not an
+ * announcement anybody reads. So the limit follows the frame.
+ *
+ * These are authoring limits, not contract limits: `BODY_MAX_LENGTH` is still
+ * 500 in the schema, every published record is still valid at 500, and RUOOD
+ * Lab scrolls a long message rather than clipping it. What this does is stop an
+ * administrator writing one.
+ */
+export const BODY_LIMITS: Record<RatioId, number> = {
+  '1:1': 320,
+  '4:5': 240,
+  '2:3': 180,
+  '9:16': 120,
+};
+
+/**
+ * The limit for this announcement.
+ *
+ * `null` frame with an image means a shape nobody chose — an animation, which
+ * keeps its own, or a picture attached before frames existed. It takes the
+ * default frame's limit rather than the full one, because an unknown picture is
+ * still a picture.
+ */
+export function bodyLimitFor(
+  frame: RatioId | null | undefined,
+  hasImage: boolean,
+  withoutImage: number,
+): number {
+  if (!hasImage) return withoutImage;
+  return BODY_LIMITS[frame ?? DEFAULT_RATIO];
+}
+
+/**
+ * The frame a published picture was cropped to, read back from its size.
+ *
+ * The frame is not stored anywhere — the crop bakes it into the pixels, and the
+ * publish pipeline re-encodes without changing the ratio, so the dimensions
+ * ARE the frame. (RUOOD Lab reads them the same way, in `image-frame.ts`.)
+ * Nearest match rather than exact, because the encoder rounds to whole pixels
+ * and caps the long edge at 1080.
+ */
+export function frameForSize(size: Size): RatioId {
+  const aspect = size.height > 0 ? size.width / size.height : 1;
+
+  let closest = RATIOS[0]!;
+  let distance = Number.POSITIVE_INFINITY;
+
+  for (const ratio of RATIOS) {
+    const gap = Math.abs(ratio.output.width / ratio.output.height - aspect);
+    if (gap < distance) {
+      distance = gap;
+      closest = ratio;
+    }
+  }
+
+  return closest.id;
+}
+
 /** Height divided by width. The number the frame is laid out from. */
 export function aspectOf(ratio: Ratio): number {
   return ratio.output.height / ratio.output.width;

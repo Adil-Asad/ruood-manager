@@ -20,6 +20,7 @@ import { ConcurrentUpdate, DeviceFlowError, GitHubError } from '@ruood/announcem
 import { ID_MAX_LENGTH, ID_MIN_LENGTH, LIFECYCLE_STATUSES } from '@ruood/announcement-schema';
 
 import {
+  announcementLabel,
   DELIVERY_LABELS,
   deliveryOf,
   explainStatus,
@@ -311,6 +312,41 @@ describe('generated ids', () => {
 // ---------------------------------------------------------------------------
 // §8 — the size report the administrator reads
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// An announcement may be a picture and nothing else
+// ---------------------------------------------------------------------------
+
+/**
+ * Three places still need something to call it: a row in the list, the sentence
+ * after a publish, and the commit message. A blank there reads as content that
+ * failed to load, and none of these words is ever written into a record.
+ */
+describe('what to call an announcement with no title', () => {
+  it('uses the title when there is one', () => {
+    expect(announcementLabel({ title: 'Eid hours', body: 'Open until four.' })).toBe('Eid hours');
+  });
+
+  it('falls back to the message, on one line', () => {
+    expect(announcementLabel({ title: '', body: 'Open until four.\nSee you there.' })).toBe(
+      'Open until four. See you there.',
+    );
+  });
+
+  it('says what a picture with no words is', () => {
+    expect(announcementLabel({ title: '', body: '', image: true })).toBe('Image announcement');
+    expect(announcementLabel({})).toBe('Untitled announcement');
+  });
+
+  it('never leaks the system’s vocabulary, like everything else on a screen', () => {
+    for (const label of [
+      announcementLabel({ title: '', body: '', image: true }),
+      announcementLabel({}),
+    ]) {
+      expect(label).not.toMatch(/(git|commit|manifest|repository|sha256|blob)/i);
+    }
+  });
+});
 
 describe('file sizes', () => {
   it('says sizes the way a person would', () => {

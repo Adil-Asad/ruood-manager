@@ -153,10 +153,55 @@ describe('rev and minSchema', () => {
 });
 
 describe('text', () => {
-  it('requires a non-empty title and body', () => {
-    expect(codes(authored({ title: '' }))).toContain('text-empty');
-    expect(codes(authored({ title: '   ' }))).toContain('text-empty');
-    expect(codes(authored({ body: '' }))).toContain('text-empty');
+  // An announcement may be a picture and nothing else, so neither field is
+  // required on its own. What is refused is a record carrying nothing at all.
+  it('accepts a title with no message, and a message with no title', () => {
+    expect(authored({ body: '' })).toBeClean();
+    expect(authored({ title: '' })).toBeClean();
+    expect(authored({ title: '   ' })).toBeClean();
+  });
+
+  it('accepts an image with no title and no message', () => {
+    expect(authored({ title: '', body: '', image: { ...validImage } })).toBeClean();
+    expect(published({ title: '', body: '', image: { ...validImage } })).toBeClean();
+  });
+
+  it('accepts the fields being absent entirely, which means the same thing', () => {
+    const record = authoredRecord() as unknown as Record<string, unknown>;
+    delete record.title;
+    delete record.body;
+
+    expect(
+      validateAnnouncementRecord({ ...record, image: { ...validImage } }, { now: NOW }),
+    ).toBeClean();
+  });
+
+  // The one case the phone produces: the original is committed to
+  // `content/media/` and the build encodes it later, so the record has no
+  // `image` object yet and the caller is what knows the picture exists.
+  it('accepts a pending original in place of an image', () => {
+    expect(codes(authored({ title: '', body: '' }))).toContain('content-empty');
+
+    expect(
+      validateAnnouncementRecord(
+        { ...authoredRecord(), title: '', body: '' },
+        { now: NOW, mode: 'authored', pendingImage: true },
+      ),
+    ).toBeClean();
+  });
+
+  it('refuses an announcement with no picture, no title and no message', () => {
+    expect(codes(authored({ title: '', body: '' }))).toContain('content-empty');
+    expect(codes(published({ title: '', body: '' }))).toContain('content-empty');
+
+    // A pending original is an AUTHORING fact. A published manifest carries the
+    // image object itself, so it can never stand in for one there.
+    expect(
+      validateAnnouncementRecord(
+        { ...publishedRecord(), title: '', body: '' },
+        { now: NOW, mode: 'published', pendingImage: true },
+      ).errors.map((issue) => issue.code),
+    ).toContain('content-empty');
   });
 
   it('enforces the length limits', () => {

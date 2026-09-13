@@ -93,7 +93,7 @@ describe('size and count limits', () => {
 
 describe('records inside the manifest', () => {
   it('reports a record error against its index', () => {
-    const result = check(manifest([publishedRecord({ title: '' })]));
+    const result = check(manifest([publishedRecord({ title: 'a'.repeat(61) })]));
     expect(result.ok).toBe(false);
     expect(result.errors.some((issue) => issue.path === 'announcements[0].title')).toBe(true);
   });

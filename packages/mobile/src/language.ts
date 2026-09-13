@@ -29,7 +29,7 @@
 
 import { ApiFailure, ConnectionFailure } from '@ruood/announcement-client';
 import { ConcurrentUpdate, DeviceFlowError, GitHubError } from '@ruood/announcement-github';
-import type { LifecycleStatus } from '@ruood/announcement-schema';
+import type { LifecycleStatus, Platform } from '@ruood/announcement-schema';
 
 import { PRODUCT_NAME } from './brand';
 
@@ -290,9 +290,71 @@ export function deliveryOf(surface: string): 'active' | 'passive' {
   return surface === 'inbox' ? 'passive' : 'active';
 }
 
+/**
+ * Who an announcement is for, in the three answers a person gives.
+ *
+ * `targeting.platforms` is a list and always has been; this is the same
+ * mapping `surfaceFor` is one field over — one word for the administrator, the
+ * schema's own field underneath, and no second place for the two to disagree.
+ *
+ * It lives here rather than in the form because it is pure, and pure things in
+ * this package are node-tested. Importing a `.tsx` into a test drags React
+ * Native in with it.
+ */
+export type Audience = 'both' | 'android' | 'ios';
+
+export function platformsFor(audience: Audience): Platform[] {
+  if (audience === 'android') return ['android'];
+  if (audience === 'ios') return ['ios'];
+  return ['android', 'ios'];
+}
+
+/**
+ * The answer a stored list came from.
+ *
+ * `web` is a legitimate CLI target that the phone does not offer, and it must
+ * not read as "one platform only" — a record naming android and web is still
+ * an Android announcement, and one naming all three is still everyone.
+ */
+export function audienceFor(platforms: readonly Platform[]): Audience {
+  const android = platforms.includes('android');
+  const ios = platforms.includes('ios');
+
+  if (android && !ios) return 'android';
+  if (ios && !android) return 'ios';
+  return 'both';
+}
+
 /** Bytes, as somebody would say them out loud. */
 export function fileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * What to call an announcement that may have no words.
+ *
+ * An announcement can be a picture and nothing else, and three places still
+ * need something to say about it: a row in the list, the sentence after a
+ * publish, and the commit message. A blank there reads as data that failed to
+ * load, so the message stands in for a missing title and a picture with neither
+ * says what it is.
+ *
+ * It is never written into a record. The stored title of an image-only
+ * announcement stays empty, because a placeholder saved as content is a
+ * placeholder somebody eventually publishes.
+ */
+export function announcementLabel(record: {
+  title?: string;
+  body?: string;
+  image?: unknown;
+}): string {
+  const title = (record.title ?? '').trim();
+  if (title) return title;
+
+  const body = (record.body ?? '').replace(/\s+/g, ' ').trim();
+  if (body) return body.length > 40 ? `${body.slice(0, 39)}…` : body;
+
+  return record.image ? 'Image announcement' : 'Untitled announcement';
 }

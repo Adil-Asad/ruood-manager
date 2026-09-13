@@ -76,7 +76,9 @@ describe('one bad record does not poison the file', () => {
     const result = parseManifest(
       manifest([
         publishedRecord({ id: 'good-one' }),
-        publishedRecord({ id: 'bad-one', title: '' }),
+        // Over the title limit — a record-level error whose path names `title`,
+        // now that an EMPTY title is a legitimate image-only announcement.
+        publishedRecord({ id: 'bad-one', title: 'a'.repeat(61) }),
         publishedRecord({ id: 'good-two' }),
       ]),
       options,

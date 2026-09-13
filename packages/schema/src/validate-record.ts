@@ -73,6 +73,16 @@ export interface RecordValidationOptions {
   externalHostAllowlist?: readonly string[];
   /** The schema version this validation is performed against. */
   schemaVersion?: number;
+  /**
+   * An original is waiting in `content/media/` for this record.
+   *
+   * Authoring-time only, and the same kind of fact as `idRegistry`: something
+   * the caller can see and the record cannot say. It makes an image-only
+   * announcement valid BEFORE the build has encoded the picture and stamped
+   * `image` onto it. Nothing is stored for it, and `published` mode ignores it
+   * — by then the `image` object is in the record.
+   */
+  pendingImage?: boolean;
 }
 
 const PUBLISHED_FIELDS = new Set([
@@ -141,7 +151,7 @@ export function validateAnnouncementRecord(
   validateUnknownFields(record, mode, collector);
   validateId(record, mode, options, collector);
   validateVersioningFields(record, options, collector);
-  validateText(record, collector);
+  validateText(record, mode, options, collector);
   validateEnums(record, collector);
   validatePriority(record, collector);
   const schedule = validateSchedule(record, mode, collector);
@@ -268,9 +278,31 @@ function validateVersioningFields(
   }
 }
 
-function validateText(record: Record<string, unknown>, collector: IssueCollector): void {
-  requireText(record, 'title', TITLE_MAX_LENGTH, true, collector);
-  requireText(record, 'body', BODY_MAX_LENGTH, false, collector);
+/**
+ * Title and message are OPTIONAL, and a picture can be the whole announcement.
+ *
+ * An image-only announcement is a real thing an administrator means: the
+ * picture is the message, and demanding a caption for it produces a caption
+ * nobody needed. So neither field is required on its own, and absent, `null`
+ * and an empty string all mean the same thing — there is no text.
+ *
+ * What is still refused is a record with NOTHING in it. An announcement with no
+ * picture, no title and no message renders as an empty dialog with a Dismiss
+ * button, which is a remote interruption carrying no information at all. That
+ * is the one combination `content-empty` exists for.
+ *
+ * Every other rule about text is unchanged: type, maximum length, single-line
+ * for a title, and no control characters or angle brackets anywhere — the last
+ * being what lets a renderer treat stored text as plain text for ever.
+ */
+function validateText(
+  record: Record<string, unknown>,
+  mode: ValidationMode,
+  options: RecordValidationOptions,
+  collector: IssueCollector,
+): void {
+  optionalText(record, 'title', TITLE_MAX_LENGTH, true, collector);
+  optionalText(record, 'body', BODY_MAX_LENGTH, false, collector);
 
   const body = record.body;
   if (typeof body === 'string' && body.length > BODY_LENGTH_WARNING) {
@@ -280,6 +312,43 @@ function validateText(record: Record<string, unknown>, collector: IssueCollector
       `The body is ${body.length} characters; over ${BODY_LENGTH_WARNING} it will scroll inside a phone-width dialog.`,
     );
   }
+
+  if (hasText(record.title) || hasText(record.body)) return;
+  if (hasImageContent(record, mode, options)) return;
+
+  collector.error(
+    'content-empty',
+    '',
+    'An announcement must carry something: a picture, a title, or a message. ' +
+      'All three are empty, so there would be nothing to show.',
+  );
+}
+
+/** Whether a value is text somebody actually wrote. */
+function hasText(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/**
+ * Whether this announcement has a picture — including one not encoded yet.
+ *
+ * A published record carries its `image` object, so reading the record is the
+ * whole answer there. An AUTHORED one may not: the Android Manager has no
+ * `sharp`, so all it can commit is the original into `content/media/<id>.<ext>`
+ * beside a record with no `image` field, and the publishing build is what
+ * encodes it and stamps the object on (see `attachPendingOriginal`).
+ *
+ * `pendingImage` is how a caller that can see `content/media/` says so. It is
+ * an authoring-time fact the record cannot express, exactly like `idRegistry`
+ * one field up — not a second image field, and nothing is stored for it.
+ */
+function hasImageContent(
+  record: Record<string, unknown>,
+  mode: ValidationMode,
+  options: RecordValidationOptions,
+): boolean {
+  if (isPlainObject(record.image)) return true;
+  return mode === 'authored' && options.pendingImage === true;
 }
 
 function validateEnums(record: Record<string, unknown>, collector: IssueCollector): void {
@@ -714,6 +783,32 @@ function reportInstantProblem(
   }
 }
 
+/**
+ * Text that may be absent, and whose rules apply the moment it is not.
+ *
+ * `undefined`, `null` and `""` are the same answer — there is no text here —
+ * because the three arrive from three different places (a field never written,
+ * a field cleared over a wire, a form left blank) and mean one thing.
+ */
+function optionalText(
+  record: Record<string, unknown>,
+  key: string,
+  maxLength: number,
+  singleLine: boolean,
+  collector: IssueCollector,
+): void {
+  const value = record[key];
+  if (value === undefined || value === null) return;
+
+  if (typeof value !== 'string') {
+    collector.error('wrong-type', key, `${key} must be a string.`);
+    return;
+  }
+  if (value.trim().length === 0) return;
+
+  checkTextValue(value, key, maxLength, singleLine, collector);
+}
+
 function requireText(
   record: Record<string, unknown>,
   key: string,
@@ -735,6 +830,18 @@ function requireText(
     collector.error('text-empty', key, `${key} must not be empty.`);
     return;
   }
+
+  checkTextValue(value, key, maxLength, singleLine, collector);
+}
+
+/** The rules that hold for any text that is present: length, and what it may contain. */
+function checkTextValue(
+  value: string,
+  key: string,
+  maxLength: number,
+  singleLine: boolean,
+  collector: IssueCollector,
+): void {
   if (value.length > maxLength) {
     collector.error(
       'text-too-long',

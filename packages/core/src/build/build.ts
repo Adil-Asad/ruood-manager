@@ -9,7 +9,8 @@
  * the client cannot use:
  *
  *   1. project        decide what is published at all
- *   2. sync images    ensure every referenced file exists; prune orphans
+ *   2. sync images    ATTACH an original the record does not reference yet,
+ *                     ensure every referenced file exists, prune orphans
  *   3. serialise      canonical JSON, so a one-field edit is a one-line diff
  *   4. VERIFY         run the CLIENT's own parser over the exact bytes
  *
@@ -25,11 +26,13 @@ import { join } from 'node:path';
 import {
   canonicalJson,
   formatIssues,
+  IMAGE_ALT_MAX_LENGTH,
   utf8ByteLength,
   validateAnnouncementRecord,
   validateManifest,
   verifyPublishable,
   type AnnouncementManifest,
+  type PublishedAnnouncement,
   type ValidationIssue,
 } from '@ruood/announcement-schema';
 
@@ -112,12 +115,24 @@ export async function buildManifest(
   // Validate each authored record first. A record that fails here is a record
   // the operator must fix; publishing it would put the burden on every install.
   const registry = idRegistryFrom(snapshot);
+
+  // Which ids have an original waiting in `content/media/`.
+  //
+  // It is what makes an image-only announcement valid here. The Android Manager
+  // cannot encode a picture — no sharp, no checkout — so it commits the
+  // original beside a record with no `image` field, and this build is what
+  // encodes and stamps it a few steps below. Validating the record without
+  // knowing that would refuse the very announcements this pipeline exists to
+  // finish.
+  const pending = await pendingOriginals(paths);
+
   for (const entry of snapshot.records) {
     const result = validateAnnouncementRecord(entry.record, {
       now: options.now,
       mode: 'authored',
       idRegistry: registry,
       editingId: entry.id,
+      pendingImage: pending.has(entry.id),
       ...(options.externalHostAllowlist
         ? { externalHostAllowlist: options.externalHostAllowlist }
         : {}),
@@ -246,10 +261,32 @@ async function checkKeyMatchesRepository(
 
 /**
  * Makes sure every referenced image exists as bytes, re-encoding from the
- * original when `dist/` is missing it.
+ * original when `dist/` is missing it — and ATTACHING one the record does not
+ * reference yet.
  *
  * Re-encoding rather than failing is what makes `dist/` genuinely disposable:
  * delete the whole directory and a build reconstructs it from `content/`.
+ *
+ * ## Why attaching happens here
+ *
+ * `attachImage` needs `sharp`: the published `image` object carries the size,
+ * the byte count and the sha256 OF THE ENCODED WEBP, and none of those can be
+ * known before the encode. The CLI has sharp, so `announce image` stamps the
+ * record itself. **The Manager app does not** — it has no checkout, no sharp
+ * and no filesystem — so all it can do is commit the original to
+ * `content/media/<id>.<ext>` beside a record with no `image` field.
+ *
+ * Nothing then joined the two. The original sat in the repository, this
+ * function skipped every record without an `image`, and the announcement
+ * published with no picture at all — silently, because an announcement without
+ * one is perfectly valid. Every image chosen on the phone was lost exactly
+ * there, and the only ones that ever reached a device were the ones attached
+ * from a laptop.
+ *
+ * So the pipeline does the half that needs a real machine, which is what the
+ * publishing workflow exists for. An original with no reference is an
+ * announcement whose picture has not been encoded yet, and this is where it is
+ * encoded.
  */
 async function resolveImages(
   paths: RepoPaths,
@@ -261,7 +298,10 @@ async function resolveImages(
   const imageProblems: string[] = [];
 
   for (const record of manifest.announcements) {
-    if (!record.image) continue;
+    if (!record.image) {
+      imageProblems.push(...(await attachPendingOriginal(paths, record, imageFiles, images)));
+      continue;
+    }
 
     const name = imageName(record.id, record.image.sha256);
     const distFile = join(output.images, name);
@@ -313,6 +353,87 @@ async function resolveImages(
   }
 
   return { images, imageFiles, imageProblems };
+}
+
+/**
+ * Encodes and stamps an original that nothing references yet.
+ *
+ * Mutates the projected record, which is the manifest about to be serialised —
+ * deliberately, and safely: `projectManifest` built these objects a moment ago
+ * from the authored records, so nothing else holds them and `content/` is not
+ * touched. The authored record stays exactly as the administrator wrote it, and
+ * the derived manifest carries what the derived bytes actually are. Writing the
+ * `image` object back into `content/` would make the build an author.
+ *
+ * The alt text is the announcement's own title. There is nowhere better: the
+ * phone does not ask for one, an empty string is refused by the validator, and
+ * a title is what a person would say the picture is for. It is already
+ * validated as single-line plain text no longer than 60 characters, so it
+ * cannot introduce anything `alt` refuses.
+ *
+ * Every failure is a problem string rather than a throw, exactly like the rest
+ * of this function — a picture that will not encode must fail the publish
+ * loudly, not take the process down.
+ */
+async function attachPendingOriginal(
+  paths: RepoPaths,
+  record: PublishedAnnouncement,
+  imageFiles: Map<string, Buffer>,
+  images: ImageInventory,
+): Promise<string[]> {
+  const original = await findOriginalFor(paths, record.id);
+  if (!original) return [];
+
+  try {
+    const encoded = await encodeAnnouncementImage(original, {
+      id: record.id,
+      alt: altTextFor(record),
+    });
+
+    record.image = encoded.image;
+    images[encoded.image.path] = encoded.data.length;
+    imageFiles.set(imageName(record.id, encoded.image.sha256), encoded.data);
+
+    return [];
+  } catch (error) {
+    // An original that cannot be encoded is an announcement somebody attached a
+    // picture to that nobody will see. Refusing the publish is the only way
+    // they find out.
+    return [`"${record.id}": ${(error as Error).message}`];
+  }
+}
+
+/**
+ * The alt text for a picture the build is attaching.
+ *
+ * The title, because that is what a person would say the picture is for and it
+ * is already validated as single-line plain text within the limit. An
+ * image-only announcement has no title, so the message is asked next — with its
+ * newlines collapsed, since `alt` is single-line — and a picture that is the
+ * entire announcement falls back to naming itself. `alt` may not be empty, and
+ * a publish that failed over a missing caption would be refusing an
+ * announcement that is otherwise perfectly valid.
+ */
+function altTextFor(record: PublishedAnnouncement): string {
+  const fromText = (record.title ?? '').trim() || (record.body ?? '').replace(/\s+/g, ' ').trim();
+  return (fromText || 'Announcement image').slice(0, IMAGE_ALT_MAX_LENGTH);
+}
+
+/**
+ * The ids with an original in `content/media/` that nothing has encoded yet.
+ *
+ * Read once per build rather than per record: `findOriginalFor` lists the
+ * directory every time it is called, and this is asked for every record in the
+ * repository before anything else happens.
+ */
+async function pendingOriginals(paths: RepoPaths): Promise<Set<string>> {
+  if (!existsSync(paths.media)) return new Set();
+
+  const ids = new Set<string>();
+  for (const entry of await readdir(paths.media)) {
+    ids.add(entry.replace(/\.[^.]+$/, ''));
+  }
+  return ids;
 }
 
 /** Writes the build to `dist/`, pruning any image nothing references. */

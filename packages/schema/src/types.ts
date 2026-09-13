@@ -219,8 +219,21 @@ export interface PublishedAnnouncement {
    */
   minSchema: number;
 
-  title: string;
-  body: string;
+  /**
+   * Optional, and absent or empty mean the same thing: no title.
+   *
+   * An announcement may be a picture and nothing else -- the image IS the
+   * message, and asking for a caption to go with it produces a caption nobody
+   * needed. What is not allowed is an announcement with no picture, no title
+   * and no message: `validateAnnouncementRecord` refuses that, because it is a
+   * record that would render as an empty dialog.
+   *
+   * Writers always write a string (empty when there is no text); readers
+   * tolerate the field being absent.
+   */
+  title?: string;
+  /** Optional, on the same terms as `title`. */
+  body?: string;
   category: Category;
 
   /** 0-100. Ordering among simultaneously eligible records. Not urgency. */

@@ -1,10 +1,15 @@
 import { flagString } from '../args';
 import type { CommandContext, CommandResult } from '../main';
-import { lifecycleOf, snapshot, table } from './shared';
+import { lifecycleOf, mediaIds, snapshot, table } from './shared';
 
 export async function runList(ctx: CommandContext): Promise<CommandResult> {
   const content = await snapshot(ctx);
   const filter = flagString(ctx.args, 'status');
+
+  // Which ids have a picture, including one the build has not encoded yet — a
+  // record authored on a phone carries no `image` object until it does. Without
+  // this an image-only announcement lists as though it had nothing in it.
+  const withMedia = await mediaIds(ctx);
 
   if (content.failures.length > 0) {
     ctx.err(`${content.failures.length} file(s) in content/ could not be read:`);
@@ -32,7 +37,7 @@ export async function runList(ctx: CommandContext): Promise<CommandResult> {
         entry.record.display.surface,
         String(entry.record.priority),
         window(entry.record.startAt, entry.record.endAt),
-        entry.record.title,
+        titleCell(entry.record, withMedia.has(entry.id)),
       ]),
     ]),
   );
@@ -65,4 +70,24 @@ function window(startAt: string, endAt: string | null | undefined): string {
 
 function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * What the TITLE column says.
+ *
+ * An announcement may be a picture and nothing else, so there is not always a
+ * title. The message stands in for it, and a picture with neither says so —
+ * rather than leaving a column blank, which reads as data that failed to load.
+ */
+function titleCell(
+  record: { title?: string; body?: string; image?: unknown },
+  hasOriginal: boolean,
+): string {
+  const title = (record.title ?? '').trim();
+  if (title) return title;
+
+  const body = (record.body ?? '').replace(/\s+/g, ' ').trim();
+  if (body) return body.length > 48 ? `${body.slice(0, 47)}…` : body;
+
+  return record.image || hasOriginal ? '(image only)' : '(no content)';
 }

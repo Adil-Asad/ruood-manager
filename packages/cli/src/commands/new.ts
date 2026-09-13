@@ -17,12 +17,16 @@ export async function runNew(ctx: CommandContext): Promise<CommandResult> {
   const title = flagString(ctx.args, 'title');
   const body = flagString(ctx.args, 'body');
 
-  if (!title || !body) {
-    ctx.err('new requires --title and --body.');
+  // Either is enough. An announcement may be a picture and nothing else, and
+  // `announce image` is what attaches one afterwards — but a record with no
+  // text and no id to derive from is one the validator would refuse anyway, so
+  // this asks for the words it needs rather than for both.
+  if (!title && !body) {
+    ctx.err('new requires --title or --body (or both).');
     return 2;
   }
 
-  const id = ctx.args.positionals[0] ?? suggestId(title);
+  const id = ctx.args.positionals[0] ?? (title ? suggestId(title) : null);
   if (!id) {
     ctx.err('No id given, and none could be derived from the title. Pass one explicitly.');
     return 2;
@@ -52,8 +56,8 @@ export async function runNew(ctx: CommandContext): Promise<CommandResult> {
 
   const record: AuthoredAnnouncement = createRecord({
     id,
-    title,
-    body,
+    ...(title ? { title } : {}),
+    ...(body ? { body } : {}),
     now: ctx.now,
     ...(flagString(ctx.args, 'start') ? { startAt: flagString(ctx.args, 'start')! } : {}),
     ...(flagString(ctx.args, 'end') ? { endAt: flagString(ctx.args, 'end')! } : {}),

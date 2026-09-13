@@ -127,11 +127,14 @@ describe('build', () => {
   it('refuses to build a record that would not validate', async () => {
     await withTempDir(async (dir) => {
       const { paths } = await scaffoldRepository(dir);
-      await saveRecord(paths, authored({ title: '' }));
+      // Nothing at all: no picture, no title, no message. An empty title on its
+      // own is a legitimate image-only announcement now, so it is no longer the
+      // case that proves a bad record is refused.
+      await saveRecord(paths, authored({ title: '', body: '' }));
 
       const result = await buildManifest(paths, { now: NOW });
       expect(result.ok).toBe(false);
-      expect(result.errors.some((issue) => issue.code === 'text-empty')).toBe(true);
+      expect(result.errors.some((issue) => issue.code === 'content-empty')).toBe(true);
     });
   });
 
@@ -315,7 +318,7 @@ describe('publish', () => {
       const repo = await repoWithIdentity(dir);
       await repo.commitPaths(['.'], 'Initial');
 
-      await saveRecord(paths, authored({ title: '' }));
+      await saveRecord(paths, authored({ title: '', body: '' }));
       const before = await readFile(paths.manifest, 'utf8');
 
       const result = await publish(paths, { now: NOW, noPush: true });

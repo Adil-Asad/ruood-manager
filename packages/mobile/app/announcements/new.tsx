@@ -33,14 +33,20 @@ import { KeyboardAvoidingView, Platform, View } from 'react-native';
 
 import { applyTransition, createRecord } from '@ruood/announcement-authoring';
 import { saveRecord } from '@ruood/announcement-github';
-import { validateAnnouncementRecord } from '@ruood/announcement-schema';
+import {
+  isVersion,
+  TITLE_MAX_LENGTH,
+  validateAnnouncementRecord,
+} from '@ruood/announcement-schema';
 
 import { useManager } from '../../src/manager';
 import { availableId } from '../../src/ids';
-import { surfaceFor } from '../../src/language';
+import { announcementLabel, platformsFor, surfaceFor } from '../../src/language';
 import {
   AnnouncementForm,
+  bodyLimitOf,
   emptyForm,
+  hasImage,
   type FormValue,
 } from '../../src/components/announcement-form';
 import { Body, Button, Callout, Confirm, Screen } from '../../src/components/ui';
@@ -53,7 +59,30 @@ export default function NewAnnouncementScreen(): React.JSX.Element {
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
-  const ready = form.title.trim().length > 0 && form.body.trim().length > 0;
+  /**
+   * Whether this can be saved at all.
+   *
+   * A picture, a title or a message — any ONE of the three is an announcement.
+   * An image-only announcement is a real thing somebody means, and demanding a
+   * caption to go with a picture produces a caption nobody needed. What is
+   * refused is all three being empty, which is the same rule the validator and
+   * the publishing build hold; this is only the immediate half of it.
+   *
+   * The message limit is the frame's, not the schema's — a Full-screen picture
+   * leaves room for a fraction of 500 characters. The version fields are
+   * optional and, when filled in, must be versions: `satisfiesVersionRange`
+   * fails CLOSED on one it cannot parse, so a typo would silently target
+   * nobody.
+   */
+  const hasContent =
+    form.title.trim().length > 0 || form.body.trim().length > 0 || hasImage(form);
+
+  const ready =
+    hasContent &&
+    form.title.length <= TITLE_MAX_LENGTH &&
+    form.body.length <= bodyLimitOf(form, null, hasImage(form)) &&
+    (form.minVersion.length === 0 || isVersion(form.minVersion)) &&
+    (form.maxVersion.length === 0 || isVersion(form.maxVersion));
 
   /**
    * Writes the record, published or not, as one commit.
@@ -67,7 +96,10 @@ export default function NewAnnouncementScreen(): React.JSX.Element {
       if (!api || !content) return false;
 
       const now = Date.now();
-      const id = availableId(content, form.title, now);
+      // From the title, or from the message when there is no title. Either
+      // leaves something readable in a `git log` a year later; an image-only
+      // announcement has neither and takes the dated fallback in `idFromTitle`.
+      const id = availableId(content, form.title.trim() || form.body.trim(), now);
 
       const draft = createRecord({
         id,
@@ -80,13 +112,25 @@ export default function NewAnnouncementScreen(): React.JSX.Element {
       });
 
       // Delivery IS `surface` and no other field. A second boolean beside it
-      // would be free to disagree with it.
+      // would be free to disagree with it. Targeting is the same rule one field
+      // over: three answers and two optional bounds, written into the
+      // `targeting` the schema already has.
       const withDelivery = {
         ...draft,
         display: { ...draft.display, surface: surfaceFor(form.delivery) },
+        targeting: {
+          platforms: platformsFor(form.audience),
+          minVersion: form.minVersion.length > 0 ? form.minVersion : null,
+          maxVersion: form.maxVersion.length > 0 ? form.maxVersion : null,
+        },
       };
 
       const record = publish ? applyTransition(withDelivery, 'publish', now) : withDelivery;
+
+      // What to call it in the commit and in the sentence afterwards. An
+      // image-only announcement has no title, and `Publish ` with nothing after
+      // it is a commit nobody can read.
+      const label = announcementLabel({ ...record, image: form.picked ?? undefined });
 
       // Validated here for an immediate answer. The publishing workflow
       // validates again, authoritatively, with the same function — this is the
@@ -96,6 +140,11 @@ export default function NewAnnouncementScreen(): React.JSX.Element {
         now,
         mode: 'authored',
         idRegistry: { active: content.records.map((entry) => entry.id), retired: content.retiredIds },
+        // The picture goes up as an ORIGINAL in the same commit; the record
+        // carries no `image` object because only an encode can produce one.
+        // Saying so here is what lets an image-only announcement pass the same
+        // check the build will run over it.
+        pendingImage: form.picked !== null,
       });
 
       if (check.errors.length > 0) {
@@ -115,7 +164,7 @@ export default function NewAnnouncementScreen(): React.JSX.Element {
                   },
                 }
               : {}),
-            message: publish ? `Publish ${record.title}` : `Draft ${record.title}`,
+            message: publish ? `Publish ${label}` : `Draft ${label}`,
           }),
       );
 
@@ -146,10 +195,16 @@ export default function NewAnnouncementScreen(): React.JSX.Element {
       // Deliberately "will be" rather than "is". The workflow builds and signs
       // after this commit, and it takes a minute or two — claiming it is
       // already live would be the app lying about something checkable.
-      notify(`Publishing “${form.title.trim()}”. It will reach RUOOD users shortly.`);
+      notify(
+        `Publishing “${announcementLabel({
+          title: form.title,
+          body: form.body,
+          image: form.picked ?? undefined,
+        })}”. It will reach RUOOD users shortly.`,
+      );
       router.replace('/(tabs)/announcements');
     }
-  }, [save, notify, form.title]);
+  }, [save, notify, form.title, form.body, form.picked]);
 
   return (
     <KeyboardAvoidingView
@@ -177,7 +232,9 @@ export default function NewAnnouncementScreen(): React.JSX.Element {
 
             {!ready ? (
               <Callout kind="info" title="Almost there">
-                Add a title and a message to continue.
+                {hasContent
+                  ? 'Check the highlighted fields to continue.'
+                  : 'Add a picture, a title or a message to continue.'}
               </Callout>
             ) : null}
           </View>

@@ -7,7 +7,7 @@ import {
 import { validateAnnouncementRecord } from '@ruood/announcement-schema';
 
 import type { CommandContext, CommandResult } from '../main';
-import { lifecycleOf, reportIssues, requireRecord, writeRecord } from './shared';
+import { lifecycleOf, mediaIds, reportIssues, requireRecord, writeRecord } from './shared';
 
 /** `activate` reads better than `publish` for a record, and `publish` is taken. */
 const COMMAND_TO_TRANSITION: Record<string, Transition> = {
@@ -46,7 +46,13 @@ export async function runTransition(ctx: CommandContext): Promise<CommandResult>
 
   // Activating is the moment a record becomes everyone's problem, so it is
   // validated again here rather than only at build time.
-  const result = validateAnnouncementRecord(next, { now: ctx.now, mode: 'authored' });
+  const result = validateAnnouncementRecord(next, {
+    now: ctx.now,
+    mode: 'authored',
+    // An image-only announcement is valid, and its picture may still be an
+    // unencoded original — see `mediaIds`.
+    pendingImage: (await mediaIds(ctx)).has(id),
+  });
   if (!result.ok && transition === 'publish') {
     ctx.err(`Refused — "${id}" is not valid to publish:`);
     reportIssues(ctx, result.errors, []);

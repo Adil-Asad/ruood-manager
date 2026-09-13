@@ -25,8 +25,10 @@ import { toCanonicalInstant } from '@ruood/announcement-schema';
 
 export interface NewRecordInput {
   id: string;
-  title: string;
-  body: string;
+  /** Optional: an announcement may be a picture and nothing else. */
+  title?: string;
+  /** Optional, on the same terms as `title`. */
+  body?: string;
   now: number;
   startAt?: string;
   endAt?: string | null;
@@ -39,8 +41,12 @@ export function createRecord(input: NewRecordInput): AuthoredAnnouncement {
   return {
     ...DEFAULT_NEW_RECORD,
     id: input.id,
-    title: input.title,
-    body: input.body,
+    // Always written, even when empty, so every record has the same shape and a
+    // canonical diff shows a cleared title as a cleared title rather than as a
+    // field that vanished. Absent and empty mean the same thing to the
+    // validator; an image-only announcement is the case that needs both.
+    title: input.title ?? '',
+    body: input.body ?? '',
     startAt: input.startAt ?? stamp,
     endAt: input.endAt === undefined ? null : input.endAt,
     status: 'draft',

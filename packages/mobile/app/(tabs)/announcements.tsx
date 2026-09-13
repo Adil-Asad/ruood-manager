@@ -37,7 +37,7 @@ import {
 } from '@ruood/announcement-schema';
 
 import { sortedRecords, useManager } from '../../src/manager';
-import { deliveryOf, statusOf } from '../../src/language';
+import { announcementLabel, deliveryOf, statusOf } from '../../src/language';
 import {
   Badge,
   Button,
@@ -127,8 +127,8 @@ export default function AnnouncementsScreen(): React.JSX.Element {
       .filter(
         (entry) =>
           !needle ||
-          entry.record.title.toLowerCase().includes(needle) ||
-          entry.record.body.toLowerCase().includes(needle),
+          (entry.record.title ?? '').toLowerCase().includes(needle) ||
+          (entry.record.body ?? '').toLowerCase().includes(needle),
       );
   }, [content, query, filter]);
 
@@ -189,6 +189,13 @@ export default function AnnouncementsScreen(): React.JSX.Element {
                 key={entry.record.id}
                 record={entry.record}
                 lifecycle={entry.lifecycle}
+                // A picture chosen on a phone has no `image` object until the
+                // publishing build encodes it, so the ORIGINAL is what says
+                // there is one. Reading only the record would show an
+                // image-only announcement as an empty row.
+                hasImage={
+                  entry.record.image !== undefined || content.media[entry.record.id] !== undefined
+                }
               />
             ))}
           </View>
@@ -252,9 +259,11 @@ function FilterChip({
 function AnnouncementCard({
   record,
   lifecycle,
+  hasImage,
 }: {
   record: AuthoredAnnouncement;
   lifecycle: LifecycleStatus;
+  hasImage: boolean;
 }): React.JSX.Element {
   const palette = usePalette();
   const delivery = deliveryOf(record.display.surface);
@@ -263,7 +272,7 @@ function AnnouncementCard({
     <Pressable
       onPress={() => router.push(`/announcements/${encodeURIComponent(record.id)}`)}
       accessibilityRole="button"
-      accessibilityLabel={`${record.title}, ${statusOf(lifecycle)}`}
+      accessibilityLabel={`${announcementLabel(record)}, ${statusOf(lifecycle)}`}
       style={({ pressed }) => ({
         backgroundColor: pressed ? palette.surface2 : palette.surface,
         borderColor: palette.border,
@@ -275,18 +284,24 @@ function AnnouncementCard({
       })}
     >
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: SPACE.md }}>
-        <Thumbnail hasImage={record.image !== undefined} />
+        <Thumbnail hasImage={hasImage} />
 
         <View style={{ flex: 1, gap: 4 }}>
+          {/* An announcement may be a picture and nothing else. The row still
+              needs a line to read, so the message stands in for a missing
+              title — and an empty second line is not drawn at all, rather than
+              left as a gap that reads as content that failed to load. */}
           <Text
             numberOfLines={1}
             style={{ color: palette.text, fontSize: 15, fontWeight: '600' }}
           >
-            {record.title}
+            {announcementLabel({ title: record.title, body: record.body, image: hasImage })}
           </Text>
-          <Text numberOfLines={2} style={{ color: palette.textDim, fontSize: 13, lineHeight: 18 }}>
-            {record.body}
-          </Text>
+          {(record.title ?? '').trim().length > 0 && (record.body ?? '').trim().length > 0 ? (
+            <Text numberOfLines={2} style={{ color: palette.textDim, fontSize: 13, lineHeight: 18 }}>
+              {record.body}
+            </Text>
+          ) : null}
         </View>
       </View>
 

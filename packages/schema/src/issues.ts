@@ -32,6 +32,7 @@ export type IssueCode =
   | 'id-retired'
   // -- text ----------------------------------------------------------------
   | 'text-empty'
+  | 'content-empty'
   | 'text-too-long'
   | 'text-unsafe-characters'
   | 'text-long-warning'

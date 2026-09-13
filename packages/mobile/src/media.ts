@@ -39,7 +39,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { readAsStringAsync, EncodingType, getInfoAsync } from 'expo-file-system/legacy';
 
-import type { CropRect, Size } from './crop';
+import type { CropRect, RatioId, Size } from './crop';
 
 /**
  * The largest original this app will send.
@@ -103,6 +103,14 @@ export interface PickedImage {
   previewUri: string;
   /** The shape it was cropped to, when it was. Display only. */
   ratio?: string;
+  /**
+   * The frame it was cropped to, when it was.
+   *
+   * The id rather than the label, because the preview lays out from it and the
+   * message limit is read from it — both of which a label cannot answer.
+   * Absent for an animation, which is never cropped.
+   */
+  ratioId?: RatioId;
   /** What the encoder actually produced. Diagnostics only; absent when nothing was re-encoded. */
   output?: Size;
 }

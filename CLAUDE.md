@@ -95,8 +95,11 @@ announcements repository, visible beside the manifests it produced.
 | `packages/client/api.ts`, `wire.ts` | `packages/github` |
 
 **`packages/ui` going means the browser Manager is gone.** The fields the phone
-deliberately does not expose — `rev`, `priority`, `category`, targeting, the
-staging channel — are now CLI-only. That is a real loss of a UI and no loss of
+deliberately does not expose — `rev`, `priority`, `category`, the staging
+channel — are now CLI-only. (`targeting` was on that list and is not any more:
+platform and version are what an operator most often means by "who is this
+for", and both are asked for on the phone now, written into the `targeting` the
+schema already had.) That is a real loss of a UI and no loss of
 capability; every one of those operations is a CLI command, and the CLI is what
 CI runs.
 
@@ -217,8 +220,8 @@ A full check before calling work done:
 npm run build && npm test && npm run typecheck
 ```
 
-Currently **798 tests across 32 suites** — 313 schema, 152 core, 141 mobile,
-66 github, 59 authoring, 43 cli, 24 client.
+Currently **834 tests across 35 suites** — 317 schema, 161 core, 162 mobile,
+68 github, 59 authoring, 43 cli, 24 client.
 
 Phase 8 added `packages/github` (66 — the device flow against a scripted GitHub,
 and the Git Data API asserted on SHAPE: one commit, `base_tree` present, a
@@ -260,8 +263,11 @@ fails instead of skipping. Run a build, or run `npm run prebuild` and then
 `npm run bundle`, before reading anything into it. It is not a regression in the
 app.
 
-RUŌOD Lab has **209 announcement tests across 12 suites** of its own, run there
-with `npx jest modules/announcements`. Its full suite is 1494 across 62.
+RUŌOD Lab has **250 announcement tests across 16 suites** of its own, run there
+with `npx jest modules/announcements`. Its full suite is 1668 across 72.
+`image-only.test.ts` (10) is the newest: an announcement that is a picture and
+nothing else, read by the app's own copy of the validator, chosen for the modal,
+and kept through all four frames.
 
 Phase 7 added `images.test.ts` (19) and `image-cache.test.ts` (17), which are
 the module's first image tests — because Phase 4 shipped with `imageUri={null}`
@@ -343,6 +349,93 @@ that is the broken state where a retired id was recreated.
   it, or a v2 field would strand every v1 install.
 - The one exception: a missing `paused` reads as `false`, because failing to the
   suppressed side would let a dropped field silence every announcement.
+
+### An original with no reference is an image the BUILD attaches
+
+`content/media/<id>.<ext>` is the original; `record.image` is the published
+WebP's path, size, byte count and sha256. Only an encode can produce the second,
+so only something with `sharp` can write it — and the Android Manager has no
+sharp, no checkout and no filesystem. All it can do is commit the original
+beside a record with no `image`.
+
+Nothing joined the two, and the result was silent: `resolveImages` skipped every
+record without an `image`, an announcement with no picture is perfectly valid,
+and so six announcements authored on the phone published without the pictures
+that had been chosen for them. The only one that ever shipped an image had been
+attached from a laptop with `announce image`.
+
+So the build attaches it — `attachPendingOriginal` in `build/build.ts`, which is
+the same division of labour the publishing workflow is built on: the phone
+writes content, the pipeline does what needs a real machine. Three rules it
+keeps:
+
+- **`content/` is not written.** The `image` object is stamped onto the
+  PROJECTED record, which is derived. A build that edited the authored record
+  would be an author, and the next diff would show a change nobody made.
+- **The alt text is the announcement's title.** `alt` may not be empty, the
+  phone does not ask for one, and the title is the only honest answer available.
+  It is already validated as single-line plain text within 60 characters.
+- **An original that will not encode FAILS the publish.** Somebody attached a
+  picture; publishing quietly without it is the bug this replaced.
+
+The other half is removal: `saveRecord` takes `removeImage`, because clearing
+`record.image` no longer removes anything on its own — an original left in
+`content/media/` is a picture that comes straight back on the next publish.
+
+### An announcement may be a picture and nothing else
+
+`title` and `body` are both OPTIONAL, and absent, `null` and `""` all mean the
+same thing — there is no text. An image-only announcement is a real thing an
+administrator means: the picture IS the message, and demanding a caption to go
+with it produces a caption nobody needed.
+
+What is still refused is a record carrying NOTHING. No picture, no title and no
+message renders as an empty dialog with a Dismiss button — a remote
+interruption with no information in it. That is `content-empty`, and it is one
+error in `validateText`, not a second validator.
+
+**The authoring-time complication is that the phone's picture is not in the
+record yet.** A record committed from the Android Manager has an original at
+`content/media/<id>.<ext>` and no `image` object, because only an encode can
+produce one (see the section above). So the validator takes a `pendingImage`
+option — an authoring-time fact the record cannot express, exactly like
+`idRegistry` beside it, stored nowhere and ignored in `published` mode. Every
+caller that validates an authored record passes it: `buildManifest` from one
+listing of `content/media/`, the CLI's `edit`, `transition` and `list` through
+`mediaIds`, and the phone from `form.picked`. **A caller that forgets it refuses
+exactly the announcements this rule exists to allow.**
+
+Two consequences are worth knowing:
+
+- **`attachPendingOriginal`'s alt text can no longer be the title.** `alt` may
+  not be empty, so it is the title, else the message collapsed to one line, else
+  `Announcement image`. A publish that failed over a missing caption would be
+  refusing an announcement that is otherwise perfectly valid.
+- **An older RUOOD Lab build skips an image-only record**, because its copy of
+  the validator still requires both fields. That fails closed and the app is
+  unaffected — the same shape as the animated-image budget — but image-only
+  announcements only reach installs on the release carrying this schema.
+
+Nothing writes a placeholder into a record. `announcementLabel` in
+`packages/mobile/src/language.ts` and `titleCell` in the CLI's `list` are
+display-only: a list row needs one line to read, and a blank there looks like
+content that failed to load. RUOOD Lab draws no `Text` at all for an empty
+field, because an empty one still takes a line height and its margin — which
+arrives on screen as a gap nobody put there.
+
+### The frame is the published dimensions, and nothing else
+
+Square, Portrait, Tall and Full screen are cropped on the phone (`crop.ts`), so
+the shape is baked into the pixels and the encoder preserves the ratio. There is
+**no frame field in the schema and must not be** — a stored name and the bytes
+it describes are two facts that can disagree. `frameForSize` reads it back here;
+RUŌOD Lab reads it back in `image-frame.ts`. Both previewed and drew a fixed
+16:9 for a year, which is why every Portrait and Tall picture arrived as a band
+cut from its middle, in both places at once.
+
+`bodyLimitFor` follows from it: the taller the frame, the less screen is left
+for words. Those are authoring limits — `BODY_MAX_LENGTH` is still 500 and every
+published record is still valid at 500.
 
 ### `action.target` is a closed enum, never a URL
 
@@ -1207,6 +1300,7 @@ whole system exists to prevent.
 | `packages/mobile/src/components/image-cropper.tsx` | Pan and pinch with no dependency, why animations never arrive, and the readout that makes a pinch checkable by hand |
 | `packages/mobile/src/ids.ts` | The id nobody has to invent, and why it is not random |
 | `packages/mobile/src/components/announcement-form.tsx` | Five fields, and why the other thirteen are out |
+| `packages/schema/src/validate-record.ts` (`validateText`) | Why a picture can be the whole announcement, and what is still refused |
 | `packages/mobile/app/announcements/new.tsx` | Why there is no publish step any more |
 | `packages/mobile/app/login.tsx` | The device flow, and who owns the waiting |
 | `packages/mobile/app/advanced.tsx` | Everything the product hides, behind a developer-only door |

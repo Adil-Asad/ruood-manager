@@ -23,8 +23,6 @@
  *                at its default; the desktop Manager still exposes it.
  *   category     `feature` / `fix` / `notice` / `tip`. Real, and invisible to
  *                the RUOOD user, so it is a taxonomy nobody is asking for.
- *   targeting    platform and version ranges. A genuine capability and a
- *                genuinely technical one.
  *   trigger, maxImpressions, minIntervalHours, dismiss
  *                frequency rules with sensible defaults, and four more
  *                decisions on a screen that already asks for five.
@@ -32,6 +30,28 @@
  * None of them are removed from the contract — every one is still there, still
  * validated, still editable from the desktop Manager. What changed is which of
  * them a phone puts in front of somebody.
+ *
+ * **`targeting` used to be on that list and is not any more.** Who an
+ * announcement is for is not a technicality — "Android only" and "only the
+ * people who have not updated yet" are the two things an operator most often
+ * means, and neither could be said from a phone. Both are the existing
+ * `targeting` fields, written by the same `applyEdits` the CLI uses; no field
+ * was added to the schema for this.
+ *
+ * ## Nothing here is compulsory except having SOMETHING
+ *
+ * A picture, a title or a message — any one of the three is an announcement,
+ * and an image-only one is a real thing somebody means. So neither text field
+ * is marked required and neither is invalid when empty; the two save buttons
+ * are what refuse a form carrying all three empty, with the same rule the
+ * validator and the publishing build hold.
+ *
+ * ## The frame decides how much there is room to say
+ *
+ * A dialog on a phone is one screen, and a Full-screen picture takes most of
+ * it. `bodyLimitFor` shrinks the message limit to what will still read under
+ * the chosen frame — an authoring guardrail, not a contract change: 500 is
+ * still valid, and RUOOD Lab scrolls a long message rather than clipping it.
  *
  * ## The id
  *
@@ -45,11 +65,11 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Image } from 'expo-image';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { BODY_MAX_LENGTH, TITLE_MAX_LENGTH } from '@ruood/announcement-schema';
+import { BODY_MAX_LENGTH, isVersion, TITLE_MAX_LENGTH } from '@ruood/announcement-schema';
 
-import { DELIVERY_LABELS, fileSize } from '../language';
+import { DELIVERY_LABELS, fileSize, type Audience } from '../language';
 import { MediaError, pickImage, prepareForUpload, type PickedImage } from '../media';
-import { ratioById } from '../crop';
+import { bodyLimitFor, frameForSize, ratioById, type RatioId, type Size } from '../crop';
 import { ImageCropper, useImageSize, type CropResult } from './image-cropper';
 import { Body, Button, Callout, Card, Field, Hint, Input, usePalette } from './ui';
 import { RADIUS, SPACE, TOUCH_TARGET } from '../theme';
@@ -66,6 +86,44 @@ export interface FormValue {
   startAt: Date;
   /** A newly chosen image, or `null` when nothing was picked this session. */
   picked: PickedImage | null;
+  /** `targeting.platforms`, as one of three answers. */
+  audience: Audience;
+  /** `targeting.minVersion` — this version of RUOOD Lab and above. */
+  minVersion: string;
+  /** `targeting.maxVersion` — BELOW this version, which is how you reach the
+   *  people who have not updated yet. */
+  maxVersion: string;
+}
+
+/**
+ * The frame in force, from whatever the form knows about the picture.
+ *
+ * A newly cropped image knows its own; an already-published one is read back
+ * from its dimensions (`frameForSize`), because the frame is not stored
+ * anywhere else and never should be.
+ */
+export function frameOf(value: FormValue, existingImage?: Size | null): RatioId | null {
+  if (value.picked) return value.picked.ratioId ?? null;
+  return existingImage ? frameForSize(existingImage) : null;
+}
+
+/** Whether this form holds a picture at all, chosen now or already attached. */
+export function hasImage(
+  value: FormValue,
+  existingImageUri?: string | null,
+  removed?: boolean,
+): boolean {
+  if (value.picked) return true;
+  return Boolean(existingImageUri) && !removed;
+}
+
+/** How many characters the message may have, given the frame. */
+export function bodyLimitOf(
+  value: FormValue,
+  existingImage?: Size | null,
+  present = true,
+): number {
+  return bodyLimitFor(frameOf(value, existingImage), present, BODY_MAX_LENGTH);
 }
 
 export function emptyForm(now: number): FormValue {
@@ -79,6 +137,11 @@ export function emptyForm(now: number): FormValue {
     // anybody presses the button.
     startAt: new Date(Math.ceil((now + 60 * 60 * 1000) / (15 * 60 * 1000)) * 15 * 60 * 1000),
     picked: null,
+    // The default `targeting` in `DEFAULT_NEW_RECORD`: both phones, no version
+    // bounds. Written here as the same answer rather than a second opinion.
+    audience: 'both',
+    minVersion: '',
+    maxVersion: '',
   };
 }
 
@@ -87,6 +150,14 @@ export interface AnnouncementFormProps {
   onChange: (value: FormValue) => void;
   /** An image already attached to this record, as a local uri. Edit screen only. */
   existingImageUri?: string | null;
+  /**
+   * The published size of that image, when it has one.
+   *
+   * It is what the frame is read back from — see `frameOf`. Absent for a
+   * picture uploaded from a phone that has not been through a publish yet,
+   * which has no published dimensions to read.
+   */
+  existingImageSize?: Size | null;
   onRemoveImage?: () => void;
   disabled?: boolean;
 }
@@ -95,6 +166,7 @@ export function AnnouncementForm({
   value,
   onChange,
   existingImageUri,
+  existingImageSize,
   onRemoveImage,
   disabled,
 }: AnnouncementFormProps): React.JSX.Element {
@@ -138,7 +210,12 @@ export function AnnouncementForm({
           crop ? { rect: crop.crop, output: crop.output } : undefined,
         );
 
-        set('picked', crop ? { ...prepared, ratio: ratioById(crop.ratio).label } : prepared);
+        set(
+          'picked',
+          crop
+            ? { ...prepared, ratio: ratioById(crop.ratio).label, ratioId: crop.ratio }
+            : prepared,
+        );
       } catch (failure) {
         setMediaError(
           failure instanceof MediaError
@@ -190,6 +267,29 @@ export function AnnouncementForm({
 
   const previewUri = value.picked?.previewUri ?? existingImageUri ?? null;
 
+  /**
+   * The shape the preview is drawn in.
+   *
+   * The chosen frame, or the published dimensions of a picture already
+   * attached. It used to be a fixed 16:9 whatever had been cropped, so the one
+   * screen showing an administrator what they had framed showed them something
+   * else — and RUOOD Lab drew the same 16:9, so nobody found out.
+   *
+   * `null` for an animation, which is never cropped and keeps its own shape:
+   * the preview then CONTAINS it rather than cropping to a box nobody chose.
+   */
+  const previewAspect = value.picked
+    ? value.picked.output
+      ? value.picked.output.width / value.picked.output.height
+      : null
+    : existingImageSize
+      ? existingImageSize.width / existingImageSize.height
+      : null;
+
+  // A picture is on the form when there is something to preview — chosen just
+  // now, or already attached and not being removed.
+  const bodyLimit = bodyLimitOf(value, existingImageSize, previewUri !== null);
+
   return (
     <View style={{ gap: SPACE.lg }}>
       {/* ---------------------------------------------------------------- */}
@@ -200,11 +300,16 @@ export function AnnouncementForm({
               source={{ uri: previewUri }}
               style={{
                 width: '100%',
-                aspectRatio: 16 / 9,
+                // The frame that was chosen, so this preview is what a RUOOD
+                // user will be shown — the app lays out from the published
+                // dimensions, which is the same number.
+                aspectRatio: previewAspect ?? 4 / 5,
                 borderRadius: RADIUS.md,
                 backgroundColor: palette.surface2,
               }}
-              contentFit="cover"
+              // A known shape fills its box exactly; an animation, whose shape
+              // nobody chose, is contained rather than cropped.
+              contentFit={previewAspect ? 'cover' : 'contain'}
               // The preview animates, because `expo-image` decodes animation
               // and React Native's own Image draws frame one. An administrator
               // choosing an animation has to be able to SEE that it moves —
@@ -284,7 +389,19 @@ export function AnnouncementForm({
 
       {/* ---------------------------------------------------------------- */}
       <Card>
-        <Field label="Title" count={value.title.length} limit={TITLE_MAX_LENGTH}>
+        {/* Neither field is required. A picture can be the whole announcement,
+            and the hint says so once rather than marking both fields optional
+            and leaving somebody to work out what that means together. */}
+        <Field
+          label="Title"
+          count={value.title.length}
+          limit={TITLE_MAX_LENGTH}
+          hint={
+            previewUri
+              ? 'Optional. The picture can be the whole announcement.'
+              : 'Optional, but say something: a title, a message, or a picture.'
+          }
+        >
           <Input
             value={value.title}
             onChangeText={(next) => set('title', next)}
@@ -297,8 +414,12 @@ export function AnnouncementForm({
         <Field
           label="Message"
           count={value.body.length}
-          limit={BODY_MAX_LENGTH}
-          hint="Plain text. Links and formatting are not shown."
+          limit={bodyLimit}
+          hint={
+            bodyLimit < BODY_MAX_LENGTH
+              ? 'Optional. Plain text, and shorter because the picture takes most of the screen.'
+              : 'Optional. Plain text; links and formatting are not shown.'
+          }
         >
           <Input
             value={value.body}
@@ -307,9 +428,15 @@ export function AnnouncementForm({
             multiline
             numberOfLines={5}
             editable={!disabled}
-            invalid={value.body.length > BODY_MAX_LENGTH}
+            invalid={value.body.length > bodyLimit}
           />
         </Field>
+
+        {value.body.length > bodyLimit ? (
+          <Callout kind="warn" title="Too long to read beside the picture">
+            {`Shorten it to ${String(bodyLimit)} characters, or choose a shorter frame.`}
+          </Callout>
+        ) : null}
       </Card>
 
       {/* ---------------------------------------------------------------- */}
@@ -328,6 +455,74 @@ export function AnnouncementForm({
           disabled={disabled}
           onPress={() => set('delivery', 'passive')}
         />
+      </Card>
+
+      {/* ---------------------------------------------------------------- */}
+      <Card title="Who should see it?">
+        <ChoiceRow
+          selected={value.audience === 'both'}
+          title="Everyone"
+          detail="Android and iPhone."
+          disabled={disabled}
+          onPress={() => set('audience', 'both')}
+        />
+        <ChoiceRow
+          selected={value.audience === 'android'}
+          title="Android only"
+          detail="Nobody on an iPhone sees it."
+          disabled={disabled}
+          onPress={() => set('audience', 'android')}
+        />
+        <ChoiceRow
+          selected={value.audience === 'ios'}
+          title="iPhone only"
+          detail="Nobody on Android sees it."
+          disabled={disabled}
+          onPress={() => set('audience', 'ios')}
+        />
+
+        <View style={{ paddingTop: SPACE.md, gap: SPACE.sm }}>
+          <Hint>
+            App versions are optional. Leave both empty and everyone on any version sees it.
+          </Hint>
+
+          <Field
+            label="Only version and above"
+            hint="For something that only exists in a newer RUOOD Lab. Example: 1.2.0"
+          >
+            <Input
+              value={value.minVersion}
+              onChangeText={(next) => set('minVersion', next.trim())}
+              placeholder="1.2.0"
+              editable={!disabled}
+              autoCapitalize="none"
+              invalid={value.minVersion.length > 0 && !isVersion(value.minVersion)}
+            />
+          </Field>
+
+          <Field
+            label="Only below version"
+            hint="For telling people to update. Below 1.2.0 means 1.1.9 sees it and 1.2.0 does not."
+          >
+            <Input
+              value={value.maxVersion}
+              onChangeText={(next) => set('maxVersion', next.trim())}
+              placeholder="1.2.0"
+              editable={!disabled}
+              autoCapitalize="none"
+              invalid={value.maxVersion.length > 0 && !isVersion(value.maxVersion)}
+            />
+          </Field>
+
+          {/* Version comparison is semantic, so "1.2" is not a version and
+              "1.10.0" is above "1.9.0". Saying so beats a rejection later. */}
+          {(value.minVersion.length > 0 && !isVersion(value.minVersion)) ||
+          (value.maxVersion.length > 0 && !isVersion(value.maxVersion)) ? (
+            <Callout kind="error" title="That is not a version">
+              Write all three parts, like 1.2.0.
+            </Callout>
+          ) : null}
+        </View>
       </Card>
 
       {/* ---------------------------------------------------------------- */}

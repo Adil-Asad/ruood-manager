@@ -2,6 +2,9 @@
  * What every command needs: locate a record, report issues, print a table.
  */
 
+import { existsSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
+
 import {
   defaultKeyPath,
   isChannel,
@@ -32,6 +35,22 @@ export function paths(ctx: CommandContext): RepoPaths {
 
 export async function snapshot(ctx: CommandContext): Promise<ContentSnapshot> {
   return loadContent(paths(ctx));
+}
+
+/**
+ * The ids with an original in `content/media/`, encoded or not.
+ *
+ * A record authored on a phone carries no `image` object — only an encode can
+ * produce one, and the publishing build is what does it — so the ORIGINAL is
+ * the only thing saying that announcement has a picture. It is what makes an
+ * image-only record valid before a build has ever run, which is why every
+ * command that validates one passes it as `pendingImage`.
+ */
+export async function mediaIds(ctx: CommandContext): Promise<Set<string>> {
+  const media = paths(ctx).media;
+  if (!existsSync(media)) return new Set();
+
+  return new Set((await readdir(media)).map((name) => name.replace(/\.[^.]+$/, '')));
 }
 
 export interface FoundRecord {

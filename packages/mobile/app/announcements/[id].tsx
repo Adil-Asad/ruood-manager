@@ -45,14 +45,26 @@ import {
 import { deleteRecord, saveRecord } from '@ruood/announcement-github';
 import {
   deriveLifecycleStatus,
+  isVersion,
+  TITLE_MAX_LENGTH,
   type AuthoredAnnouncement,
 } from '@ruood/announcement-schema';
 
 import { useManager } from '../../src/manager';
-import { deliveryOf, explainStatus, statusOf, surfaceFor } from '../../src/language';
+import {
+  announcementLabel,
+  audienceFor,
+  deliveryOf,
+  explainStatus,
+  platformsFor,
+  statusOf,
+  surfaceFor,
+} from '../../src/language';
 import {
   AnnouncementForm,
+  bodyLimitOf,
   emptyForm,
+  hasImage,
   type FormValue,
 } from '../../src/components/announcement-form';
 import {
@@ -109,12 +121,19 @@ export default function AnnouncementScreen(): React.JSX.Element {
 
     const startAt = new Date(record.startAt);
     setForm({
-      title: record.title,
-      body: record.body,
+      // `?? ''` because either may be absent: an image-only announcement has no
+      // words, and a text input's value can never be `undefined`.
+      title: record.title ?? '',
+      body: record.body ?? '',
       delivery: deliveryOf(record.display.surface),
       timing: startAt.getTime() > Date.now() ? 'later' : 'now',
       startAt,
       picked: null,
+      // Read back from the record's own `targeting`, so the form opens on what
+      // is actually published rather than on the defaults.
+      audience: audienceFor(record.targeting.platforms),
+      minVersion: record.targeting.minVersion ?? '',
+      maxVersion: record.targeting.maxVersion ?? '',
     });
     setRemoveImage(false);
     // Keyed on the id and the update stamp, not on `record` itself: a new
@@ -172,15 +191,46 @@ export default function AnnouncementScreen(): React.JSX.Element {
     const wasScheduled = new Date(record.startAt).getTime() > Date.now();
 
     return (
-      form.title !== record.title ||
-      form.body !== record.body ||
+      form.title !== (record.title ?? '') ||
+      form.body !== (record.body ?? '') ||
       form.delivery !== deliveryOf(record.display.surface) ||
       form.timing !== (wasScheduled ? 'later' : 'now') ||
       form.picked !== null ||
       removeImage ||
+      form.audience !== audienceFor(record.targeting.platforms) ||
+      form.minVersion !== (record.targeting.minVersion ?? '') ||
+      form.maxVersion !== (record.targeting.maxVersion ?? '') ||
       (form.timing === 'later' && new Date(record.startAt).getTime() !== form.startAt.getTime())
     );
   }, [record, form, removeImage]);
+
+  /**
+   * Whether what is on screen can be written.
+   *
+   * A picture, a title or a message — any one of the three. Removing the last
+   * of them is what this refuses, and it is the same rule the publishing build
+   * holds, not a second opinion about it.
+   *
+   * The message limit follows the frame — a Full-screen picture leaves room for
+   * a fraction of 500 characters — and a version that will not parse targets
+   * nobody, because `satisfiesVersionRange` fails closed on one it cannot read.
+   */
+  const hasContent =
+    form.title.trim().length > 0 ||
+    form.body.trim().length > 0 ||
+    hasImage(form, imageUri, removeImage);
+
+  const valid =
+    hasContent &&
+    form.title.length <= TITLE_MAX_LENGTH &&
+    form.body.length <=
+      bodyLimitOf(
+        form,
+        record?.image ?? null,
+        hasImage(form, imageUri, removeImage),
+      ) &&
+    (form.minVersion.length === 0 || isVersion(form.minVersion)) &&
+    (form.maxVersion.length === 0 || isVersion(form.maxVersion));
 
   /** Applies the form and commits. Shared by both save buttons. */
   const save = useCallback(
@@ -198,6 +248,11 @@ export default function AnnouncementScreen(): React.JSX.Element {
           body: form.body.trim(),
           startAt: (form.timing === 'later' ? form.startAt : new Date(now)).toISOString(),
           display: { ...record.display, surface: surfaceFor(form.delivery) },
+          targeting: {
+            platforms: platformsFor(form.audience),
+            minVersion: form.minVersion.length > 0 ? form.minVersion : null,
+            maxVersion: form.maxVersion.length > 0 ? form.maxVersion : null,
+          },
           ...(removeImage ? { image: null } : {}),
         },
         now,
@@ -219,7 +274,11 @@ export default function AnnouncementScreen(): React.JSX.Element {
                   },
                 }
               : {}),
-            message: `Update ${next.title}`,
+            // Clearing the field is not enough on its own: the publishing build
+            // attaches an original nothing references, so the bytes have to go
+            // with it or the picture returns on the next publish.
+            ...(removeImage && !form.picked ? { removeImage: true } : {}),
+            message: `Update ${announcementLabel(next)}`,
           }),
       );
 
@@ -239,11 +298,15 @@ export default function AnnouncementScreen(): React.JSX.Element {
       notify(
         published
           ? 'Changes saved. They will reach RUOOD users shortly.'
-          : `Publishing “${form.title.trim()}”. It will reach RUOOD users shortly.`,
+          : `Publishing “${announcementLabel({
+              title: form.title,
+              body: form.body,
+              image: form.picked ?? record?.image,
+            })}”. It will reach RUOOD users shortly.`,
       );
       router.replace('/(tabs)/announcements');
     }
-  }, [save, notify, published, form.title]);
+  }, [save, notify, published, form.title, form.body, form.picked, record?.image]);
 
   const saveDraft = useCallback(async (): Promise<void> => {
     setBusy(true);
@@ -264,7 +327,7 @@ export default function AnnouncementScreen(): React.JSX.Element {
       const ok = await run((snapshot) =>
         saveRecord(api, snapshot, {
           record: next,
-          message: `${active ? 'Activate' : 'Deactivate'} ${next.title}`,
+          message: `${active ? 'Activate' : 'Deactivate'} ${announcementLabel(next)}`,
         }),
       );
 
@@ -283,7 +346,7 @@ export default function AnnouncementScreen(): React.JSX.Element {
     setDialog(null);
 
     const ok = await run((snapshot) =>
-      deleteRecord(api, snapshot, record.id, `Delete ${record.title}`),
+      deleteRecord(api, snapshot, record.id, `Delete ${announcementLabel(record)}`),
     );
 
     setBusy(false);
@@ -332,6 +395,9 @@ export default function AnnouncementScreen(): React.JSX.Element {
             value={form}
             onChange={setForm}
             existingImageUri={removeImage ? null : imageUri}
+            // The published size, which is what the chosen frame is read back
+            // from. Absent until the picture has been through a publish.
+            existingImageSize={removeImage ? null : (record.image ?? null)}
             onRemoveImage={() => {
               setRemoveImage(true);
               setForm((current) => ({ ...current, picked: null }));
@@ -344,14 +410,14 @@ export default function AnnouncementScreen(): React.JSX.Element {
               kind="primary"
               full
               busy={busy}
-              disabled={!dirty}
+              disabled={!dirty || !valid}
               onPress={() => setDialog('save')}
             >
               {published ? 'Publish Changes' : 'Publish'}
             </Button>
 
             {!published ? (
-              <Button full busy={busy} disabled={!dirty} onPress={() => void saveDraft()}>
+              <Button full busy={busy} disabled={!dirty || !valid} onPress={() => void saveDraft()}>
                 Save Changes
               </Button>
             ) : null}
@@ -364,6 +430,15 @@ export default function AnnouncementScreen(): React.JSX.Element {
               >
                 {inactive ? 'Activate' : 'Deactivate'}
               </Button>
+            ) : null}
+
+            {/* Removing the picture from an announcement that had no words is
+                how somebody reaches this, and a greyed-out button with no
+                explanation is how they stay there. */}
+            {!hasContent ? (
+              <Callout kind="info" title="Nothing left to show">
+                An announcement needs a picture, a title or a message.
+              </Callout>
             ) : null}
 
             <Button kind="danger" full busy={busy} onPress={() => setDialog('delete')}>

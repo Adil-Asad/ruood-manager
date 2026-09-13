@@ -81,13 +81,26 @@ The published manifest, field by field. Types are in
 
 | Field | Rule |
 | --- | --- |
-| `title` | 1–60 chars, single line. |
-| `body` | 1–500 chars. Newlines allowed (paragraph breaks are preserved). Warning above 300 — it will scroll on a phone. |
+| `title` | **Optional.** Up to 60 chars, single line. Absent and `""` mean the same thing. |
+| `body` | **Optional.** Up to 500 chars. Newlines allowed (paragraph breaks are preserved). Warning above 300 — it will scroll on a phone. |
 | `category` | `feature` \| `fix` \| `notice` \| `tip` |
 | `priority` | 0–100. Ordering among simultaneously eligible records. **Not urgency.** |
 
 Both strings refuse control characters, U+2028/U+2029 and `<` `>`, so stored
 text can never read as markup.
+
+**An announcement must carry at least one of a picture, a title or a message**
+(`content-empty`). Neither text field is required on its own, because a picture
+can be the whole announcement — demanding a caption for one produces a caption
+nobody needed. What is refused is a record with all three empty, which renders
+as an empty dialog with a Dismiss button.
+
+While authoring, the picture may not be in the record yet: a record committed
+from the Android Manager carries an original at `content/media/<id>.<ext>` and
+no `image` object, because only an encode can produce one. The
+`pendingImage` validation option is how a caller that can see `content/media/`
+says so — an authoring-time fact like `idRegistry`, stored nowhere. A published
+manifest always carries the `image` object itself, so it never applies there.
 
 ### Scheduling
 

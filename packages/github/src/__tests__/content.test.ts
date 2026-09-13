@@ -277,6 +277,48 @@ describe('saving', () => {
     expect(Object.keys(treeOf(http))).toEqual(['content/announcements/reports-center.json']);
   });
 
+  it('removes the original when the image is removed', async () => {
+    const { http, client } = clientFor({
+      files: {
+        'content/announcements/reports-center.json': canonicalJson(record()),
+        'content/media/reports-center.jpg': 'the picture',
+      },
+    });
+    const snapshot = await loadContent(client);
+
+    await saveRecord(client, snapshot, {
+      record: record(),
+      removeImage: true,
+      message: 'Remove the picture',
+    });
+
+    // Clearing `record.image` is not enough: the publishing build attaches an
+    // original that no record references — which is how a picture chosen on a
+    // phone gets encoded at all — so bytes left behind come back on the next
+    // publish.
+    expect(treeOf(http)['content/media/reports-center.jpg']).toBeNull();
+  });
+
+  it('keeps the original when a replacement is chosen in the same save', async () => {
+    const { http, client } = clientFor({
+      files: {
+        'content/announcements/reports-center.json': canonicalJson(record()),
+        'content/media/reports-center.jpg': 'the old picture',
+      },
+    });
+    const snapshot = await loadContent(client);
+
+    await saveRecord(client, snapshot, {
+      record: record(),
+      image: { base64: 'R0lGODlh', extension: '.jpg' },
+      removeImage: true,
+      message: 'Replace the picture',
+    });
+
+    // A replacement is a write, not a removal, whatever the flag says.
+    expect(treeOf(http)['content/media/reports-center.jpg']).toBe('written-blob');
+  });
+
   it('writes the record canonically, so a diff shows the field that changed', async () => {
     const { http, client } = clientFor({ files: {} });
     const snapshot = await loadContent(client);

@@ -16,7 +16,7 @@ import {
 
 import { flagBool, flagString } from '../args';
 import type { CommandContext, CommandResult } from '../main';
-import { reportIssues, requireRecord, snapshot, writeRecord } from './shared';
+import { mediaIds, reportIssues, requireRecord, snapshot, writeRecord } from './shared';
 
 /**
  * Edits a record's content fields.
@@ -68,6 +68,10 @@ export async function runEdit(ctx: CommandContext): Promise<CommandResult> {
     mode: 'authored',
     idRegistry: idRegistryFrom(content),
     editingId: id,
+    // Clearing the title of an announcement whose picture is the whole message
+    // is a legitimate edit. The original says there is one; the `image` object
+    // may not exist yet.
+    pendingImage: (await mediaIds(ctx)).has(id),
   });
 
   if (!result.ok) {

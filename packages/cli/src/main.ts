@@ -129,7 +129,8 @@ SETUP
 
 AUTHORING
   new <id>                      create a draft
-      --title <text> --body <text> [--start <instant>] [--end <instant>]
+      [--title <text>] [--body <text>]  (at least one)
+      [--start <instant>] [--end <instant>]
       [--surface modal|banner|inbox] [--category feature|fix|notice|tip]
   edit <id>                     change content fields (never id, status or rev)
       [--title <text>] [--body <text>] [--category <category>]

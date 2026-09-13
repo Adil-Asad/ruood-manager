@@ -201,6 +201,17 @@ export interface SaveRecordInput {
   record: AuthoredAnnouncement;
   /** A newly chosen original, base64. Written in the SAME commit as the record. */
   image?: { base64: string; extension: string } | null;
+  /**
+   * Removes the original this id holds, in the same commit.
+   *
+   * Clearing `record.image` is not enough and used to be all that happened.
+   * The publishing build attaches an original that no record references — that
+   * is how a picture chosen on a phone gets encoded at all, since the phone
+   * cannot compute the encoded hash — so an original left behind in
+   * `content/media/` is an image that comes straight back on the next publish.
+   * Removing the picture has to remove the bytes.
+   */
+  removeImage?: boolean;
   message: string;
 }
 
@@ -219,9 +230,9 @@ export async function saveRecord(
   input: SaveRecordInput,
 ): Promise<string> {
   const files: FileWrite[] = [recordWrite(input.record)];
+  const existing = snapshot.media[input.record.id];
 
   if (input.image) {
-    const existing = snapshot.media[input.record.id];
     const path = mediaFile(input.record.id, input.image.extension);
 
     if (existing && existing.path !== path) {
@@ -229,6 +240,11 @@ export async function saveRecord(
     }
 
     files.push({ path, kind: 'base64', content: input.image.base64 });
+  } else if (input.removeImage && existing) {
+    // The record and the bytes go together, in one commit, for the same reason
+    // they arrive together: a repository observed between the two is one the
+    // build reads differently from either state.
+    files.push({ path: existing.path, kind: 'delete' });
   }
 
   const result = await client.commit({
