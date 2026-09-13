@@ -268,7 +268,13 @@ A development build **may** use Metro. That is what it is for.
 
 ### Preview APK (QA, no Metro, no PC)
 
+Every command in this document runs from `packages/mobile`. That directory is
+the Expo project; the workspace root is not one, and an `eas` command run there
+produces a build that fails in the bundler on `Unable to resolve module
+../../App` -- see "There is exactly ONE Expo project" in `CLAUDE.md`.
+
 ```bash
+cd packages/mobile
 npx eas build --profile preview --platform android
 ```
 

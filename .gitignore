@@ -2,6 +2,16 @@ node_modules/
 dist/
 coverage/
 *.tsbuildinfo
+
+# The Expo app is `packages/mobile`, and it is the ONLY Expo project here.
+# A `.expo/`, `app.json` or `eas.json` at THIS level makes the workspace root
+# look like one too, and the root `package.json` has no `main` - so
+# `expo export:embed` falls back to `expo/AppEntry.js` and dies resolving
+# `../../App`. That is the EAS bundling failure, and it begins with an Expo or
+# EAS command run from here instead of from `packages/mobile`.
+/.expo/
+/app.json
+/eas.json
 .env
 .env.local
 .DS_Store

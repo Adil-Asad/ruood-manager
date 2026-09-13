@@ -78,6 +78,13 @@ const IDENTITY: Record<AppVariant, { name: string; packageId: string }> = {
  */
 const VERSION = '1.0.0';
 
+/**
+ * The EAS project builds are uploaded to: `@adill/ruood-announcement-manager`,
+ * whose slug is the `slug` below. Overridden by `EAS_PROJECT_ID` — see the
+ * `extra.eas` comment for why it is written down rather than left to `eas init`.
+ */
+const EAS_PROJECT_ID = '2fd32418-6810-4dc9-a2dc-07e38d247469';
+
 export default ({ config }: ConfigContext): ExpoConfig => {
   const identity = IDENTITY[VARIANT];
 
@@ -269,14 +276,25 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         ? { announcementsBranch: process.env.ANNOUNCEMENTS_BRANCH }
         : {}),
       router: {},
-      // `eas.projectId` is written here by `eas init`, which is an
-      // account-scoped action and therefore the operator's. The key is OMITTED
-      // rather than set to null: a null serialises as `{}` in the resolved
-      // config, which reads as a project id that exists and is empty — and
-      // that is a worse thing to debug than an absent key.
-      ...(process.env.EAS_PROJECT_ID
-        ? { eas: { projectId: process.env.EAS_PROJECT_ID } }
-        : {}),
+      /**
+       * Which EAS project this app builds into.
+       *
+       * It used to be omitted unless `EAS_PROJECT_ID` was set, on the reasoning
+       * that `eas init` is an account-scoped action and therefore the
+       * operator's. That was right about whose decision it is and wrong about
+       * where the answer lands: `eas init` cannot write into a `.ts` config, so
+       * run anywhere near this repository it writes an `app.json` beside
+       * whatever directory it was in — and at the WORKSPACE ROOT that produces
+       * a second Expo project whose `package.json` has no `main`. The bundler
+       * then falls back to `expo/AppEntry.js` and dies on `../../App`, which is
+       * exactly how the preview build failed.
+       *
+       * So the id is recorded here, where the rest of this app's identity
+       * lives. It is not a credential — it names a project, and the account
+       * that owns it is what authorises anything. `EAS_PROJECT_ID` still wins,
+       * so building into a different project stays one variable away.
+       */
+      eas: { projectId: process.env.EAS_PROJECT_ID ?? EAS_PROJECT_ID },
     },
   };
 };

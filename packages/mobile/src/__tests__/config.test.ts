@@ -75,7 +75,18 @@ describe('the Android build carries no secret', () => {
     // Everything legitimately in this config is a name, a path, a colour, a
     // package id or a sentence. A long unbroken run of base64-ish characters is
     // not any of those.
-    const suspects = strings.filter((value) => /^[A-Za-z0-9+/_=-]{32,}$/.test(value));
+    //
+    // With ONE exception, and it is named rather than pattern-matched: the EAS
+    // project id. It is a UUID that says which project a build uploads into,
+    // the account that owns it is what authorises anything, and it is written
+    // into the config precisely so nobody runs `eas init` at the workspace root
+    // again. Excusing the exact value keeps every OTHER long literal failing.
+    const projectId = (config.extra?.eas as { projectId?: string } | undefined)?.projectId;
+    expect(projectId).toMatch(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
+
+    const suspects = strings
+      .filter((value) => value !== projectId)
+      .filter((value) => /^[A-Za-z0-9+/_=-]{32,}$/.test(value));
     expect(suspects).toEqual([]);
   });
 

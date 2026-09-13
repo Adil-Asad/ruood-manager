@@ -211,6 +211,11 @@ npm run lint      -w @ruood/announcement-manager-android
 
 # Everything the app needs is compiled in, and none of it is a secret: a
 # device-flow client id has no client secret, and the repository is public.
+#
+# EVERY expo and eas command runs from packages/mobile. That is the Expo
+# project; the workspace root is not one, and running eas there is what broke
+# the preview build. See "There is exactly ONE Expo project" below.
+cd packages/mobile
 GITHUB_CLIENT_ID=Iv1.xxxx ANNOUNCEMENTS_OWNER=Adil-Asad ANNOUNCEMENTS_REPO=ruood-announcements   npx eas build --profile preview --platform android
 ```
 
@@ -766,6 +771,51 @@ second copy of the router in the tree, which is the exact shape of the React
 This is the third time hoisting has broken this app the same way, and the second
 time in `babel.config.js`. The rule that keeps emerging: **never let a bare
 module name decide whether a build step happens.**
+
+### There is exactly ONE Expo project, and it is `packages/mobile`
+
+The workspace root is not an Expo project and must never be made to look like
+one. Every `expo` and `eas` command runs from `packages/mobile`, which is where
+`app.config.ts`, `eas.json`, `metro.config.js`, `babel.config.js`, `index.js`
+and `app/` all live.
+
+**What happens when that slips**, and it is a bad failure because the message
+names neither the cause nor this project:
+
+```
+Unable to resolve module ../../App from
+  /home/expo/workingdir/build/node_modules/expo/AppEntry.js
+```
+
+`resolveEntryPoint` in `@expo/config` reads the `main` field of the package.json
+**at the project root**. `packages/mobile/package.json` has `main: "index.js"`;
+the workspace root's has no `main` at all and no root `index.*`, so it falls
+through to its last resort — `expo/AppEntry.js`, the classic pre-router entry,
+whose first line is `import App from '../../App'`. There is no `App` there and
+there must not be one: this is an expo-router app, and `index.js` importing
+`expo-router/entry` is its entry (see the header of that file).
+
+It slipped because `eas init` cannot write a project id into a `.ts` config, so
+run from the repository root it wrote an `app.json` and an `eas.json` THERE —
+and with an `eas.json` beside it, `eas build` at the root treats the root as the
+project. The build then uploads, installs, and dies in the bundler.
+
+Two things prevent the recurrence:
+
+- **`extra.eas.projectId` is written in `app.config.ts`** rather than left for
+  `eas init` to place wherever it was run. `EAS_PROJECT_ID` still overrides it.
+  A project id is not a credential — it names a project, and the account that
+  owns it is what authorises anything — and `config.test.ts`'s opaque-literal
+  sweep excuses that ONE value by name, so every other long literal still fails.
+- **`/.expo/`, `/app.json` and `/eas.json` are gitignored at the root**, so a
+  stray one cannot be committed or uploaded to a builder again.
+
+Reproducing it takes one command, and it is worth knowing both halves:
+
+```bash
+npx expo export:embed --eager --platform android --dev false   # from the root: FAILS on ../../App
+cd packages/mobile && npx expo export:embed --eager --platform android --dev false   # bundles
+```
 
 ### `unstable_serverRoot` is what makes a RELEASE build possible
 
