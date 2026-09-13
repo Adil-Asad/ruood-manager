@@ -283,17 +283,26 @@ and no machine of the operator's switched on at all. It shows the sign-in
 screen and runs standalone.
 
 What it does need is a **GitHub client id and an announcements repository**,
-compiled in at build time:
+compiled in at build time. Those come from `eas.json`, on every build profile:
 
-```bash
-GITHUB_CLIENT_ID=Iv23li... ANNOUNCEMENTS_OWNER=<owner> ANNOUNCEMENTS_REPO=<repo> \
-  npx eas build --profile preview --platform android
+```json
+"env": {
+  "APP_VARIANT": "preview",
+  "GITHUB_CLIENT_ID": "Iv23li...",
+  "ANNOUNCEMENTS_OWNER": "Adil-Asad",
+  "ANNOUNCEMENTS_REPO": "ruood-announcements"
+}
 ```
 
+**Not from your shell.** `GITHUB_CLIENT_ID=... npx eas build` reads right and
+does nothing: the config is evaluated on the builder, which never saw your
+shell. Exported variables reach a LOCAL Gradle build only.
+
 None of that is a secret. A device-flow client id has no client secret, and the
-repository is public. A build assembled without them is not broken — it says so
-on the sign-in screen, and a development build can be given a client id from
-Advanced without rebuilding.
+repository is public. A build assembled without them is not broken (it says so
+on the sign-in screen) but it also cannot be rescued on the device: Advanced
+overrides a client id, the repository is compiled in, so the app stays
+unconfigured until it is rebuilt.
 
 ### Production AAB (Google Play)
 

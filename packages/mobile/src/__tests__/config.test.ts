@@ -286,3 +286,66 @@ describe('the storage keys', () => {
     expect(GITHUB_TOKEN_KEY).toContain('github');
   });
 });
+
+/**
+ * What a CLOUD build is given, which is not what a local one is given.
+ *
+ * A local build reads `app.config.ts` in a shell the operator exported
+ * variables into, so `GITHUB_CLIENT_ID=... npx expo ...` reaches it. **An EAS
+ * build does not.** The config is evaluated on the builder, in a process that
+ * never saw that shell, and the only environment it has is the one `eas.json`
+ * declares for the profile.
+ *
+ * The cost of getting that wrong is an APK that installs, opens, and says "This
+ * app has not been set up" — and cannot be rescued from Advanced either, since
+ * the repository is compiled in and deliberately not overridable. It is the
+ * kind of failure that is only visible on a device, after a full cloud build.
+ *
+ * None of these three is a secret, which is why they can live in a file in the
+ * repository at all: a device-flow client id has no client secret (that is the
+ * whole reason the device flow is usable from an APK), and `owner/repo` is
+ * where a PUBLIC repository lives. The signing key is not here and never will
+ * be — it is a secret of the publishing workflow.
+ */
+describe('every EAS build profile is given what the app needs', () => {
+  const easJson = JSON.parse(
+    readFileSync(join(__dirname, '..', '..', 'eas.json'), 'utf8'),
+  ) as { build: Record<string, { env?: Record<string, string> }> };
+
+  const profiles = Object.entries(easJson.build);
+
+  it('has the three profiles this project builds', () => {
+    expect(profiles.map(([name]) => name).sort()).toEqual([
+      'development',
+      'preview',
+      'production',
+    ]);
+  });
+
+  it.each(['GITHUB_CLIENT_ID', 'ANNOUNCEMENTS_OWNER', 'ANNOUNCEMENTS_REPO'])(
+    'passes %s to every profile',
+    (variable) => {
+      for (const [name, profile] of profiles) {
+        expect(`${name}: ${profile.env?.[variable] ?? ''}`).not.toBe(`${name}: `);
+      }
+    },
+  );
+
+  it('gives each profile its own APP_VARIANT, matching its name', () => {
+    // The build variant decides the application id and the launcher name, so a
+    // profile carrying the wrong one installs over another build.
+    for (const [name, profile] of profiles) {
+      expect(profile.env?.APP_VARIANT).toBe(name);
+    }
+  });
+
+  it('declares nothing that looks like a credential', () => {
+    // `eas.json` is committed, so it is the one place build configuration could
+    // quietly become a place to put a secret.
+    for (const [, profile] of profiles) {
+      for (const key of Object.keys(profile.env ?? {})) {
+        expect(key).not.toMatch(/(KEY|SECRET|TOKEN|PASSWORD)$/);
+      }
+    }
+  });
+});

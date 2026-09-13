@@ -209,15 +209,35 @@ npm run prebuild  -w @ruood/announcement-manager-android  # a real AndroidManife
 npm run typecheck -w @ruood/announcement-manager-android
 npm run lint      -w @ruood/announcement-manager-android
 
-# Everything the app needs is compiled in, and none of it is a secret: a
-# device-flow client id has no client secret, and the repository is public.
-#
 # EVERY expo and eas command runs from packages/mobile. That is the Expo
 # project; the workspace root is not one, and running eas there is what broke
 # the preview build. See "There is exactly ONE Expo project" below.
+#
+# GITHUB_CLIENT_ID, ANNOUNCEMENTS_OWNER and ANNOUNCEMENTS_REPO come from
+# eas.json's `env`, NOT from this shell -- a cloud build never sees it. See
+# "A cloud build is given nothing by your shell" below.
 cd packages/mobile
-GITHUB_CLIENT_ID=Iv1.xxxx ANNOUNCEMENTS_OWNER=Adil-Asad ANNOUNCEMENTS_REPO=ruood-announcements   npx eas build --profile preview --platform android
+npx eas build --profile preview --platform android
+
+# A LOCAL release build does read the shell, and needs all four exported:
+export APP_VARIANT=preview GITHUB_CLIENT_ID=Iv23li... \
+       ANNOUNCEMENTS_OWNER=Adil-Asad ANNOUNCEMENTS_REPO=ruood-announcements
+npm run prebuild -w @ruood/announcement-manager-android
+npm run bundle   -w @ruood/announcement-manager-android
 ```
+
+**The EAS upload is governed by `.easignore`, not `.gitignore`.** Once that file
+exists EAS stops reading `.gitignore` entirely, so every exclusion has to be
+restated in it -- a `.easignore` listing only "extra" things makes the archive
+BIGGER. Without one the archive was ~458 MB, carrying `node_modules/` (1.4 GB),
+`packages/mobile/node_modules/` (1.2 GB) and `packages/mobile/android/` (1.5 GB
+of Gradle output). With it, 1.5 MB: the source and manifests the build reads.
+
+What must stay in it, because EAS runs `npm ci` at the workspace root and then
+bundles `packages/mobile`: every package MANIFEST (npm resolves the whole
+workspace graph or the install fails, `core` and `cli` included), the lockfile,
+and the SOURCE of the four packages the app imports. `easignore.test.ts` pins
+both halves of that.
 
 A full check before calling work done:
 
@@ -225,8 +245,15 @@ A full check before calling work done:
 npm run build && npm test && npm run typecheck
 ```
 
-Currently **834 tests across 35 suites** — 317 schema, 161 core, 162 mobile,
+Currently **879 tests across 37 suites** — 317 schema, 207 mobile, 161 core,
 68 github, 59 authoring, 43 cli, 24 client.
+
+Two of the mobile suites are about the BUILD rather than the app, and both pin
+something that otherwise fails only in the cloud: `metro-resolution.test.ts` (7)
+that the shared packages resolve to source and never to `dist`, and
+`easignore.test.ts` (32) that the upload keeps every manifest and every source
+the bundler reads while leaving out `node_modules/` and the generated Android
+project.
 
 Phase 8 added `packages/github` (66 — the device flow against a scripted GitHub,
 and the Git Data API asserted on SHAPE: one commit, `base_tree` present, a
@@ -691,14 +718,57 @@ Keep these two apart, always:
 
 ### Metro resolves the shared packages to SOURCE, like Vite does
 
-`packages/mobile/metro.config.js` aliases `@ruood/announcement-schema`,
-`-client`, `-authoring` and `-github` to their `src`, for the same cause: their `dist` is CommonJS, and an `export * from` through it
-is a re-export a bundler cannot analyse statically. `vite.config.ts` records the
-same reasoning.
+`packages/mobile/metro.config.js` maps `@ruood/announcement-schema`, `-client`,
+`-authoring` and `-github` to their `src/index.ts`, for the same cause: their
+`dist` is CommonJS, and an `export * from` through it is a re-export a bundler
+cannot analyse statically. `vite.config.ts` recorded the same reasoning.
 
 The consequence is the one worth protecting: the phone runs the SAME validator
-the Manager publishes with. `bundle.test.ts` asserts schema literals are really
-in the shipped bytecode, so the alias cannot silently stop working.
+the Manager publishes with, and the bundle needs nothing to have been compiled
+first -- which matters most on EAS, where nothing runs this repository's build
+script.
+
+**The mapping is `resolver.resolveRequest`, and it was `extraNodeModules`, which
+is NOT an alias.** In `metro-resolver/src/resolve.js` the extra paths are
+`.concat(extraPaths)` onto the END of the candidate list: a fallback for a
+package that could not be found at all. npm workspaces symlink every one of
+these into the root `node_modules`, so each was always found, and the alias
+underneath was never once consulted.
+
+On a development machine that is invisible -- `dist/` is there, resolution
+succeeds one step earlier than intended, and the bundle is correct anyway. On
+EAS it is fatal, and this is exactly how a preview build failed:
+
+```
+Unable to resolve module @ruood/announcement-authoring
+  from packages/mobile/app/announcements/new.tsx
+The package was found at node_modules/@ruood/announcement-authoring/package.json
+But its main module could not be resolved: .../dist/index.js
+```
+
+`dist/` is gitignored, so it is not in the upload, and nothing in a managed
+build compiles this workspace. Metro finds the package, cannot resolve the
+`main` it declares, and throws `InvalidPackageError` -- it does NOT fall through
+to the remaining candidates, so the fallback could not have rescued it even if
+it had been reached.
+
+`resolveRequest` runs BEFORE node_modules resolution, so the mapping is now the
+answer rather than a guess made after the real answer failed. Nothing about the
+packages changed: `main` still points at `dist` for node, the CLI and every jest
+suite.
+
+**`bundle.test.ts` cannot catch this and never could** -- `dist` carries the
+same string literals as `src`, so a bundle built from either passes that sweep.
+`metro-resolution.test.ts` asserts the thing that actually differs: which FILE
+the config resolves to, and that no `dist` is on that path.
+
+Reproduce it in one command, and it is worth doing before trusting any change
+here:
+
+```bash
+mv packages/authoring/dist packages/authoring/dist.bak   # what EAS sees
+cd packages/mobile && npx expo export:embed --eager --platform android --dev false
+```
 
 Two other things there are load-bearing and were bugs once:
 
@@ -846,6 +916,36 @@ output — which is strictly better than sweeping an approximation.
 `packages/mobile/index.js` exists for the same reason: it makes the entry a real
 file inside the package rather than a specifier resolved out of a nested
 `node_modules`.
+
+### A cloud build is given nothing by your shell
+
+`app.config.ts` reads `GITHUB_CLIENT_ID`, `ANNOUNCEMENTS_OWNER` and
+`ANNOUNCEMENTS_REPO` from the environment, and compiles them into `extra`. A
+local build reads them from the shell they were exported in. **An EAS build
+cannot**: the config is evaluated on the builder, in a process that never saw
+that shell, and the only environment it has is what `eas.json` declares for the
+profile.
+
+So they are in `packages/mobile/eas.json`, on every profile, beside
+`APP_VARIANT`. Passing them on the `eas build` command line looks right, is what
+this file used to say, and does nothing at all.
+
+The failure is quiet and total: the APK installs, opens, and says **"This app
+has not been set up"**. It cannot be rescued from Advanced either -- a client id
+can be overridden there, and `hasRepository()` is compiled in and deliberately
+not overridable, so `setClientId` leaves the app `unconfigured` and the sign-in
+button never appears. Nothing on the device says why.
+
+None of the three is a secret, which is what allows a committed file to hold
+them: a device-flow client id has NO client secret -- that is the entire reason
+the flow is usable from an APK, where anything compiled in is readable by anyone
+who unzips it -- and `owner/repo` is where a public repository lives. The
+announcement signing key is not there, is not readable from a phone, and is a
+secret of the publishing workflow.
+
+`config.test.ts` asserts every profile carries all three, and that no key in any
+profile's `env` ends in `KEY`, `SECRET`, `TOKEN` or `PASSWORD` -- `eas.json` is
+now a place build configuration lives, so it is swept like `extra` is.
 
 ### `APP_VARIANT` must be EXPORTED, not set on the prebuild line alone
 

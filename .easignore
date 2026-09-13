@@ -1,0 +1,91 @@
+# What does NOT go to the EAS builder.
+#
+# ## Read this before adding a line
+#
+# **`.easignore` REPLACES `.gitignore` for the upload.** Once this file exists,
+# EAS stops consulting `.gitignore` entirely — so every exclusion that matters
+# has to be stated HERE, even the obvious ones. A `.easignore` that listed only
+# "extra" things would make the archive bigger, not smaller, because it would
+# silently drop every rule `.gitignore` was providing.
+#
+# That is what this file is fixing. Without it the archive was ~458 MB: it
+# carried `node_modules/` (1.4 GB), `packages/mobile/node_modules/` (1.2 GB) and
+# `packages/mobile/android/` (1.5 GB of Gradle output), none of which a builder
+# has any use for. With it the archive is the ~1.5 MB of source and manifests
+# that the build actually reads.
+#
+# ## The rule for what stays
+#
+# EAS runs `npm ci` at the workspace root and then bundles `packages/mobile`.
+# So it needs every package MANIFEST (npm resolves the whole workspace graph or
+# the install fails), the lockfile, and the SOURCE of the four packages the app
+# imports — `schema`, `client`, `authoring` and `github`, which
+# `packages/mobile/metro.config.js` resolves to `src` rather than to `dist`.
+#
+# Nothing below removes any of that. If you are about to exclude something under
+# `packages/`, check it against that list first: the failure mode is a build
+# that gets all the way to bundling before it says a module cannot be resolved.
+
+# ---------------------------------------------------------------------------
+# Dependencies. EAS installs its own from package-lock.json, which is uploaded.
+# ---------------------------------------------------------------------------
+node_modules/
+
+# ---------------------------------------------------------------------------
+# The native project.
+#
+# `packages/mobile/android/` is gitignored and regenerated — EAS runs prebuild
+# from `app.config.ts`, which is where the application id, the plugins and
+# `blockedPermissions` are actually decided. Uploading a local copy ships
+# whatever happened to be on one laptop, and it is the single largest thing in
+# the archive.
+# ---------------------------------------------------------------------------
+packages/mobile/android/
+packages/mobile/ios/
+
+# ---------------------------------------------------------------------------
+# Compiled output.
+#
+# Safe to drop because Metro resolves the shared packages to their SOURCE (see
+# the `resolveRequest` block in `packages/mobile/metro.config.js`) — nothing on
+# the bundle's path reads `dist/`, and nothing in a managed build would have
+# compiled it anyway.
+# ---------------------------------------------------------------------------
+dist/
+coverage/
+*.tsbuildinfo
+
+# ---------------------------------------------------------------------------
+# Local state, caches and tooling.
+# ---------------------------------------------------------------------------
+.git/
+.expo/
+.vscode/
+.idea/
+*.log
+
+# The workspace root is NOT an Expo project, and a stray config here is how a
+# build ends up rooted at it. Kept out of the upload for the same reason
+# `.gitignore` keeps it out of the repository.
+/app.json
+/eas.json
+
+# ---------------------------------------------------------------------------
+# The announcements repository, cloned here by the Manager.
+#
+# A separate git repository with its own history, and never part of an app
+# build.
+# ---------------------------------------------------------------------------
+/workspace/
+
+# ---------------------------------------------------------------------------
+# Build artefacts and anything holding a secret. Neither belongs in an upload.
+# ---------------------------------------------------------------------------
+*.apk
+*.aab
+*.keystore
+*.jks
+.env
+.env.local
+.DS_Store
+Thumbs.db

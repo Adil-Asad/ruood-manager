@@ -75,17 +75,62 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
-config.resolver.extraNodeModules = {
-  ...config.resolver.extraNodeModules,
-  '@ruood/announcement-schema': path.resolve(workspaceRoot, 'packages', 'schema', 'src'),
-  '@ruood/announcement-client': path.resolve(workspaceRoot, 'packages', 'client', 'src'),
-  // The same reasoning again, for the two packages that arrived with the
-  // GitHub-native architecture. `authoring` is what makes the phone and the
-  // publishing build agree about what an edit means; `github` is how the phone
-  // reaches the repository at all. Both must be the SOURCE, for the CommonJS
-  // re-export reason above.
-  '@ruood/announcement-authoring': path.resolve(workspaceRoot, 'packages', 'authoring', 'src'),
-  '@ruood/announcement-github': path.resolve(workspaceRoot, 'packages', 'github', 'src'),
+/**
+ * The four shared packages, and the SOURCE file each one resolves to.
+ *
+ * `schema` is the contract, `client` the platform-neutral plumbing, `authoring`
+ * what makes the phone and the publishing build agree about what an edit means,
+ * and `github` how the phone reaches the repository at all. Every one of them
+ * must be the source, for the CommonJS re-export reason above.
+ */
+const SOURCE_ENTRY = {
+  '@ruood/announcement-schema': path.resolve(workspaceRoot, 'packages/schema/src/index.ts'),
+  '@ruood/announcement-client': path.resolve(workspaceRoot, 'packages/client/src/index.ts'),
+  '@ruood/announcement-authoring': path.resolve(workspaceRoot, 'packages/authoring/src/index.ts'),
+  '@ruood/announcement-github': path.resolve(workspaceRoot, 'packages/github/src/index.ts'),
+};
+
+/**
+ * The alias has to run BEFORE node_modules resolution, and `extraNodeModules`
+ * does not.
+ *
+ * This used to be `config.resolver.extraNodeModules`, which reads like an alias
+ * and is not one. In `metro-resolver/src/resolve.js` the extra paths are
+ * `.concat(extraPaths)` onto the END of the candidate list: they are a FALLBACK
+ * for a package that could not be found at all. npm workspaces symlink every
+ * one of these into the root `node_modules`, so each is always found — and the
+ * alias below it was never once consulted.
+ *
+ * That was invisible on a development machine, because `npm run build` has been
+ * run there and `dist/index.js` exists, so resolution succeeded one step
+ * earlier than intended and produced a working bundle from the built output.
+ *
+ * On EAS it is fatal. `dist/` is gitignored, so it is not in the upload, and
+ * nothing in a managed build runs this repository's build script. Metro then
+ * finds the package, cannot resolve the `main` it declares, and throws
+ * `InvalidPackageError` — it does NOT fall through to the remaining candidates,
+ * so the fallback could not have saved it even if it had been reached:
+ *
+ *     Unable to resolve module @ruood/announcement-authoring ...
+ *     But its main module could not be resolved:
+ *       node_modules/@ruood/announcement-authoring/dist/index.js
+ *
+ * `resolveRequest` is the supported hook that runs first, so the mapping is now
+ * the answer rather than a guess made after the real answer failed. Nothing
+ * about the packages changes: `main` still points at `dist` for node, the CLI
+ * and every jest suite. Only this bundle reads the source — which is what the
+ * whole arrangement was for, and what makes the build independent of whether
+ * anything was compiled first.
+ */
+const defaultResolveRequest = config.resolver.resolveRequest;
+
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  const source = SOURCE_ENTRY[moduleName];
+  if (source) {
+    return { type: 'sourceFile', filePath: source };
+  }
+
+  return (defaultResolveRequest ?? context.resolveRequest)(context, moduleName, platform);
 };
 
 /**

@@ -12,7 +12,10 @@
         "gradleCommand": ":app:assembleDebug"
       },
       "env": {
-        "APP_VARIANT": "development"
+        "APP_VARIANT": "development",
+        "GITHUB_CLIENT_ID": "Iv23liJYMfFxn95oqplR",
+        "ANNOUNCEMENTS_OWNER": "Adil-Asad",
+        "ANNOUNCEMENTS_REPO": "ruood-announcements"
       }
     },
     "preview": {
@@ -21,7 +24,10 @@
         "buildType": "apk"
       },
       "env": {
-        "APP_VARIANT": "preview"
+        "APP_VARIANT": "preview",
+        "GITHUB_CLIENT_ID": "Iv23liJYMfFxn95oqplR",
+        "ANNOUNCEMENTS_OWNER": "Adil-Asad",
+        "ANNOUNCEMENTS_REPO": "ruood-announcements"
       }
     },
     "production": {
@@ -31,7 +37,10 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "APP_VARIANT": "production"
+        "APP_VARIANT": "production",
+        "GITHUB_CLIENT_ID": "Iv23liJYMfFxn95oqplR",
+        "ANNOUNCEMENTS_OWNER": "Adil-Asad",
+        "ANNOUNCEMENTS_REPO": "ruood-announcements"
       }
     }
   },
