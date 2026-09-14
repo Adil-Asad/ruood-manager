@@ -83,6 +83,26 @@ a checked-in copy would make "the source of truth" ambiguous.
 change what every publish signs. Upgrading the toolchain is a commit in the
 announcements repository, visible beside the manifests it produced.
 
+**The pin and the schema are upgraded TOGETHER, and forgetting that stops
+publishing dead.** The phone bundles the schema from this repository's *source*
+(Metro resolves it there — see the Metro section), so the moment a rule is
+loosened here the app can author a record the pinned toolchain cannot read. The
+build validates EVERY published record, so one such record fails the whole
+publish, and `dist/` then freezes for every announcement after it.
+
+That happened: `v1.0.1`'s validator still required a title and a body, an
+image-only announcement was published from the phone on 2026-09-13, and every
+publish from that moment on exited non-zero at *Build, sign and commit*. The
+manifest stayed at revision 24 while eight records accumulated in `content/`.
+Nothing on a device says so — an unchanged manifest is a 304, which is exactly
+what a correctly working app does when there is genuinely nothing new. The
+symptom reported was "announcements only work on the first launch".
+
+So: **loosening a rule in `packages/schema` means a new tag here and a commit in
+the announcements repository moving `ref:` to it**, in that order. The failure
+is loud in Actions and silent everywhere else, so it is worth checking the last
+run there whenever an announcement "does not arrive".
+
 ### What was removed, and what replaced it
 
 | Removed | Replaced by |

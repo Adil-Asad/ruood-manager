@@ -65,8 +65,21 @@ export const DEFAULT_MANAGER_REPOSITORY = 'Adil-Asad/ruood-manager';
  * none of its native libvips. A repository scaffolded against it would be born
  * unable to publish, and the failure arrives late — `npm ci` and the build both
  * succeed, and only the image step says so.
+ *
+ * `v1.0.2` rather than `v1.0.1` because v1.0.1's validator still REQUIRED a
+ * title and a body, and the app that writes `content/` no longer does — an
+ * announcement may be a picture and nothing else. The phone accepted one, the
+ * pinned build refused it, and the publish step exited non-zero. That is worse
+ * than it sounds: the build validates every published record, so ONE record the
+ * pinned toolchain cannot read freezes `dist/` for every announcement after it.
+ * Nothing on a device says so; the manifest simply stops changing, and every
+ * install goes on showing the last file that published.
+ *
+ * The lesson is the pin's, not the validator's: a schema the app can author and
+ * the pinned toolchain cannot read is a broken publisher, so the two are
+ * upgraded together — and this constant is half of that.
  */
-export const DEFAULT_MANAGER_REF = 'v1.0.1';
+export const DEFAULT_MANAGER_REF = 'v1.0.2';
 
 export interface ScaffoldOptions {
   /** `owner/repo` of the Manager repository. */
