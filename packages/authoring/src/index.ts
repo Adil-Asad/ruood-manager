@@ -33,5 +33,6 @@
 
 export * from './repo-paths';
 export * from './defaults';
+export * from './retention';
 export * from './authoring';
 export * from './edit';

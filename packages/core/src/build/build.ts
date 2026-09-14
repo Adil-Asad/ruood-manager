@@ -61,6 +61,15 @@ export interface BuildOptions {
   keepRevision?: boolean;
   externalHostAllowlist?: readonly string[];
 
+  /**
+   * Overrides the repository's retention limit for this build only.
+   *
+   * For previewing what a different limit would publish — `announce retention`
+   * uses it to answer "and what would 5 look like?" without writing the setting
+   * first. Left alone, the stored limit is what applies.
+   */
+  maxRetained?: number;
+
   /** Which manifest is being produced. Staging additionally includes drafts. */
   channel?: Channel;
 
@@ -91,6 +100,8 @@ export interface BuildResult {
   channel: Channel;
   /** The key id the manifest was signed with, or `null` if it was not signed. */
   signedBy: string | null;
+  /** The retention limit this build applied. */
+  maxRetained: number;
 }
 
 /**
@@ -153,6 +164,11 @@ export async function buildManifest(
       ? (await readPublished(paths, channel)).manifest?.paused ?? false
       : options.paused;
 
+  // The retention window. It comes from `content/state.json`, so it is a
+  // property of the repository rather than of whoever ran the build — the
+  // phone, the CLI and CI all publish the same set.
+  const maxRetained = options.maxRetained ?? snapshot.maxRetained;
+
   const projected = projectManifest(snapshot.records.map((entry) => entry.record), {
     now: options.now,
     revision,
@@ -160,6 +176,7 @@ export async function buildManifest(
     // Staging exists to preview a draft on a real device before deciding it is
     // ready; production never publishes one.
     includeDrafts: channel === 'staging',
+    maxRetained,
   });
 
   const excluded = projected.excluded;
@@ -226,6 +243,7 @@ export async function buildManifest(
     problems,
     channel,
     signedBy,
+    maxRetained,
   };
 }
 

@@ -212,6 +212,11 @@ npm run typecheck            # builds first, then typechecks all packages
 node packages/cli/dist/bin.js help
 node packages/cli/dist/bin.js <command> --repo <path to announcements repo>
 
+# how many announcements stay published. The same setting the phone writes,
+# in the same place -- content/state.json.
+node packages/cli/dist/bin.js retention --repo <path>            # show it
+node packages/cli/dist/bin.js retention --repo <path> --max 10   # set it
+
 # signing and channels, locally. The workflow does this in CI from a secret;
 # these still work for an operator with a checkout and the key.
 node packages/cli/dist/bin.js keygen  --repo <path>          # once, per repository
@@ -265,8 +270,8 @@ A full check before calling work done:
 npm run build && npm test && npm run typecheck
 ```
 
-Currently **879 tests across 37 suites** — 317 schema, 207 mobile, 161 core,
-68 github, 59 authoring, 43 cli, 24 client.
+Currently **987 tests across 41 suites** — 317 schema, 224 mobile, 197 core,
+93 authoring, 77 github, 55 cli, 24 client.
 
 Two of the mobile suites are about the BUILD rather than the app, and both pin
 something that otherwise fails only in the cloud: `metro-resolution.test.ts` (7)
@@ -503,6 +508,49 @@ allowlisted host.
 The validator refuses angle brackets and control characters so stored text can
 never read as markup, whatever a future renderer does. No HTML, no
 markdown-with-links, no WebView.
+
+### Retention is an EXCLUSION, never an archive
+
+`content/` is history and grows for ever — that is what gives the Manager a
+`git log` of everything ever announced. `dist/` is downloaded, parsed and held
+in memory by every install, so an announcement nobody will be shown again costs
+every device bytes for as long as it stays in the file.
+
+`maxRetained` in `content/state.json` is the line between them: **the newest N
+of the records that would otherwise be published, and nothing older.** Default
+20, minimum 1, maximum `MANIFEST_MAX_RECORDS` — a limit above the schema's own
+cap could never be satisfied, so the two are one constant.
+
+What it must never become is a transition:
+
+- **Nothing is written to `content/`.** The excluded record keeps its stored
+  status exactly as the administrator left it, and raising the limit publishes
+  it again with nothing to undo. A build that archived the oldest record would
+  be an author, and the next diff would show a change nobody made — the same
+  rule `attachPendingOriginal` keeps one section up.
+- **A paused record is never reactivated.** Retention only ever removes, so
+  `paused` survives falling outside the window and coming back. Inside the
+  window it is published carrying `paused: true`, as it always was.
+- **Drafts, archived and expired records do not take a place.** The window is
+  applied AFTER `exclusionFor`, so it governs what is published rather than what
+  exists.
+
+"Newest" is `publishedAt`, falling back to `startAt` for a draft that has never
+been published, and it is deliberately **not** `byPresentationOrder` — sorting
+the window by priority would let an important announcement from a year ago hold
+a place against this week's. Ties fall through to `startAt` and then the id, so
+a build is reproducible, which the dry-run diff and the signature both need.
+
+Zero is not a limit. Suppressing everything is what `paused` at the manifest
+root is for, and a retention limit of zero would publish an empty file that
+reads on a device exactly like an outage.
+
+**One setting, two front ends**, the usual rule: Settings → "Announcements
+people see" on the phone, `announce retention [--max <n>]` in the CLI, both
+writing the same field of the same file, and `projectManifest` the only thing
+that acts on it. `saveState` MERGES for that reason — every publish ends with
+`saveState(paths, { revision })`, and writing that object whole would erase the
+limit on the first publish after it was set.
 
 ### The kill switch is sticky
 
@@ -1460,6 +1508,8 @@ whole system exists to prevent.
 | `packages/authoring/src/edit.ts` | The closed editable set, and why each exclusion is excluded |
 | `packages/authoring/src/authoring.ts` | The legal state moves, in one table |
 | `packages/authoring/src/repo-paths.ts` | Where a record lives, said once for both transports |
+| `packages/authoring/src/retention.ts` | How many stay published, and why zero is not a limit |
+| `packages/core/src/build/project.ts` (`applyRetention`) | The newest N, and why it never archives anything |
 | `packages/core/src/ci/publish-workflow.ts` | Where signing happens now, and what it may not do |
 | `packages/client/src/session.ts` | The one secret, and where it may live |
 | `packages/mobile/metro.config.js` | The monorepo, and the alias to schema source |

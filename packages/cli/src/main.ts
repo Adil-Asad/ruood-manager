@@ -33,6 +33,7 @@ import { runEdit } from './commands/edit';
 import { runPush } from './commands/push';
 import { runKeygen } from './commands/keygen';
 import { runVerify } from './commands/verify';
+import { runRetention } from './commands/retention';
 
 export interface CommandContext {
   args: ParsedArgs;
@@ -55,6 +56,7 @@ const COMMANDS: Record<string, (ctx: CommandContext) => Promise<CommandResult>> 
   push: runPush,
   keygen: runKeygen,
   verify: runVerify,
+  retention: runRetention,
   status: runStatus,
   revert: runRevert,
   delete: runDelete,
@@ -151,6 +153,10 @@ AUTHORING
   restore <id>                  archived -> draft
   bump <id>                     bump rev — RE-SHOWS to everyone who saw it
   delete <id>                   remove the record and retire its id for ever
+
+SETTINGS
+  retention [--max <n>]         how many announcements stay published. Older ones
+                                stay in content/ and are simply not sent
 
 PUBLISHING
   validate                      validate content/ and what it would produce

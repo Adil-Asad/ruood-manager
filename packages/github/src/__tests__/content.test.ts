@@ -17,8 +17,17 @@
 import { canonicalJson, type AuthoredAnnouncement } from '@ruood/announcement-schema';
 import { encodeBase64, type Http, type HttpRequestInit } from '@ruood/announcement-client';
 
+import { DEFAULT_MAX_RETAINED } from '@ruood/announcement-authoring';
+
 import { createGitHubClient, GitHubError } from '../repository';
-import { deleteRecord, emptyCache, idRegistryOf, loadContent, saveRecord } from '../content';
+import {
+  deleteRecord,
+  emptyCache,
+  idRegistryOf,
+  loadContent,
+  saveRecord,
+  saveSettings,
+} from '../content';
 
 const REPOSITORY = { owner: 'adil-asad', repo: 'ruood-announcements', branch: 'main' };
 
@@ -400,5 +409,113 @@ describe('deleting', () => {
       .find((content) => content.includes('mike'))!;
 
     expect(JSON.parse(ledger)).toEqual(['mike']);
+  });
+});
+
+describe('the retention setting', () => {
+  /** The content of the blob a commit wrote to `content/state.json`. */
+  function written(http: { calls: { url: string; body: unknown }[] }): Record<string, unknown> {
+    const blob = http.calls
+      .filter((call) => call.url.endsWith('/git/blobs'))
+      .map((call) => (call.body as { content: string }).content)
+      .at(-1)!;
+
+    return JSON.parse(blob) as Record<string, unknown>;
+  }
+
+  it('reads it from the settings file', async () => {
+    const { client } = clientFor({
+      files: { 'content/state.json': '{"revision":24,"maxRetained":5}' },
+    });
+
+    await expect(loadContent(client)).resolves.toMatchObject({
+      settings: { maxRetained: 5 },
+    });
+  });
+
+  it('is the default when the file has never said', async () => {
+    const { client } = clientFor({ files: { 'content/state.json': '{"revision":24}' } });
+
+    const snapshot = await loadContent(client);
+    expect(snapshot.settings.maxRetained).toBe(DEFAULT_MAX_RETAINED);
+    expect(snapshot.failures).toHaveLength(0);
+  });
+
+  it('is the default when there is no file at all, which is an ordinary repository', async () => {
+    const { client } = clientFor({ files: {} });
+
+    await expect(loadContent(client)).resolves.toMatchObject({
+      settings: { maxRetained: DEFAULT_MAX_RETAINED, stored: {} },
+    });
+  });
+
+  it('PRESERVES the revision counter, which nothing else may touch', async () => {
+    const { http, client } = clientFor({
+      files: { 'content/state.json': '{"revision":24,"maxRetained":20}' },
+    });
+    const snapshot = await loadContent(client);
+
+    await saveSettings(client, snapshot, { maxRetained: 5 }, 'Keep the newest 5');
+
+    // A manifest whose revision went backwards reads as older than the file it
+    // replaced, on every install.
+    expect(written(http)).toEqual({ maxRetained: 5, revision: 24 });
+  });
+
+  it('preserves a field it does not know about', async () => {
+    const { http, client } = clientFor({
+      files: { 'content/state.json': '{"revision":3,"somethingLater":"keep me"}' },
+    });
+    const snapshot = await loadContent(client);
+
+    await saveSettings(client, snapshot, { maxRetained: 9 }, 'Keep the newest 9');
+
+    expect(written(http)).toMatchObject({ somethingLater: 'keep me', revision: 3 });
+  });
+
+  it('is ONE commit', async () => {
+    const { http, client } = clientFor({ files: { 'content/state.json': '{"revision":1}' } });
+    const snapshot = await loadContent(client);
+
+    await saveSettings(client, snapshot, { maxRetained: 5 }, 'Keep the newest 5');
+
+    expect(http.calls.filter((call) => call.method === 'PATCH')).toHaveLength(1);
+    expect(Object.keys(treeOf(http))).toEqual(['content/state.json']);
+  });
+
+  it('refuses a limit outside the bounds rather than clamping it', async () => {
+    const { client } = clientFor({ files: { 'content/state.json': '{"revision":1}' } });
+    const snapshot = await loadContent(client);
+
+    await expect(
+      saveSettings(client, snapshot, { maxRetained: 0 }, 'Keep none'),
+    ).rejects.toThrow(GitHubError);
+  });
+
+  it('reports an unreadable settings file WITHOUT taking the load down', async () => {
+    const { client } = clientFor({
+      files: {
+        'content/announcements/reports-center.json': canonicalJson(record()),
+        'content/state.json': '{ not json',
+      },
+    });
+
+    const snapshot = await loadContent(client);
+
+    // Announcements still load: a settings file is not a reason to stop
+    // authoring. Unlike the retired-id ledger, this one does not throw.
+    expect(snapshot.records).toHaveLength(1);
+    expect(snapshot.failures.map((failure) => failure.path)).toEqual(['content/state.json']);
+    expect(snapshot.settings.stored).toBeNull();
+  });
+
+  it('refuses to WRITE over a settings file it could not read', async () => {
+    const { client } = clientFor({ files: { 'content/state.json': '{ not json' } });
+    const snapshot = await loadContent(client);
+
+    // Merging onto a guess is how the revision counter gets invented.
+    await expect(
+      saveSettings(client, snapshot, { maxRetained: 5 }, 'Keep the newest 5'),
+    ).rejects.toThrow(GitHubError);
   });
 });

@@ -722,3 +722,220 @@ describe('the staging channel', () => {
     });
   });
 });
+
+/**
+ * The retention window, driven the way an operator drives it.
+ *
+ * The unit tests in `core` cover the selection; this covers the thing that
+ * actually has to hold: publish a sixth announcement under a limit of five and
+ * the oldest stops being published, while its file stays exactly where it is.
+ *
+ * Every record here is activated at the same fixed `--now`, so `publishedAt` is
+ * identical across all of them and the ordering falls through to `startAt` —
+ * which is what the distinct `--start` dates are for.
+ */
+describe('retention', () => {
+  const started = (day: number): string => `2026-09-0${day}T00:00:00Z`;
+
+  async function announce(
+    run: (...argv: string[]) => Promise<Run>,
+    id: string,
+    day: number,
+  ): Promise<void> {
+    await run('new', id, '--title', id.toUpperCase(), '--body', 'Body', '--start', started(day));
+    await run('activate', id);
+  }
+
+  async function publishedIds(repo: string): Promise<string[]> {
+    const manifest = JSON.parse(
+      await readFile(join(repo, 'dist', 'announcements.json'), 'utf8'),
+    ) as { announcements: { id: string }[] };
+
+    return manifest.announcements.map((record) => record.id).sort();
+  }
+
+  it('shows the default, and the bounds', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+
+      const result = await run('retention');
+      expect(result.code).toBe(0);
+      expect(result.out).toContain('Maximum retained announcements: 20');
+      expect(result.out).toContain('the default');
+    });
+  });
+
+  it('moves the window forward as announcements are published', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      expect((await run('retention', '--max', '5')).code).toBe(0);
+
+      for (const [id, day] of [['note-a', 1], ['note-b', 2], ['note-c', 3], ['note-d', 4], ['note-e', 5]] as const) {
+        await announce(run, id, day);
+      }
+      expect((await run('publish', '--no-push', '--accept-warnings')).code).toBe(0);
+      expect(await publishedIds(repo)).toEqual(['note-a', 'note-b', 'note-c', 'note-d', 'note-e']);
+
+      await announce(run, 'note-f', 6);
+      await run('publish', '--no-push', '--accept-warnings');
+      expect(await publishedIds(repo)).toEqual(['note-b', 'note-c', 'note-d', 'note-e', 'note-f']);
+
+      await announce(run, 'note-g', 7);
+      await run('publish', '--no-push', '--accept-warnings');
+      expect(await publishedIds(repo)).toEqual(['note-c', 'note-d', 'note-e', 'note-f', 'note-g']);
+    });
+  });
+
+  it('keeps the excluded records, unchanged, in content/', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('retention', '--max', '2');
+
+      for (const [id, day] of [['note-a', 1], ['note-b', 2], ['note-c', 3]] as const) {
+        await announce(run, id, day);
+      }
+      await run('publish', '--no-push', '--accept-warnings');
+
+      expect(await publishedIds(repo)).toEqual(['note-b', 'note-c']);
+
+      // The distinction the whole feature turns on. "a" is not deleted and not
+      // archived — it is simply not sent.
+      const file = join(repo, 'content', 'announcements', 'note-a.json');
+      expect(existsSync(file)).toBe(true);
+      expect(JSON.parse(await readFile(file, 'utf8')).status).toBe('published');
+
+      const listed = await run('list');
+      expect(listed.out).toContain('note-a');
+    });
+  });
+
+  it('names what falls outside it, and says they are still here', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('retention', '--max', '1');
+      await announce(run, 'old-one', 1);
+      await announce(run, 'new-one', 2);
+
+      const result = await run('retention');
+      expect(result.out).toContain('- old-one');
+      expect(result.out).toContain('Nothing in content/ is removed.');
+    });
+  });
+
+  it('follows the setting up and back down again', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('retention', '--max', '5');
+
+      for (const [id, day] of [
+        ['note-a', 1],
+        ['note-b', 2],
+        ['note-c', 3],
+        ['note-d', 4],
+        ['note-e', 5],
+        ['note-f', 6],
+        ['note-g', 7],
+      ] as const) {
+        await announce(run, id, day);
+      }
+
+      await run('publish', '--no-push', '--accept-warnings');
+      expect(await publishedIds(repo)).toEqual(['note-c', 'note-d', 'note-e', 'note-f', 'note-g']);
+
+      await run('retention', '--max', '10');
+      await run('publish', '--no-push', '--accept-warnings');
+      expect(await publishedIds(repo)).toEqual(['note-a', 'note-b', 'note-c', 'note-d', 'note-e', 'note-f', 'note-g']);
+
+      await run('retention', '--max', '3');
+      await run('publish', '--no-push', '--accept-warnings');
+      expect(await publishedIds(repo)).toEqual(['note-e', 'note-f', 'note-g']);
+    });
+  });
+
+  it('never reactivates a paused announcement, in or out of the window', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('retention', '--max', '2');
+
+      await announce(run, 'old-paused', 1);
+      await run('pause', 'old-paused');
+      await announce(run, 'new-paused', 2);
+      await run('pause', 'new-paused');
+      await announce(run, 'newest', 3);
+
+      await run('publish', '--no-push', '--accept-warnings');
+
+      const manifest = JSON.parse(
+        await readFile(join(repo, 'dist', 'announcements.json'), 'utf8'),
+      ) as { announcements: { id: string; paused?: boolean }[] };
+
+      // The one inside the window is published and still paused; the one
+      // outside it is not published — and neither record changed.
+      expect(manifest.announcements.find((r) => r.id === 'new-paused')?.paused).toBe(true);
+      expect(manifest.announcements.map((r) => r.id).sort()).toEqual(['new-paused', 'newest']);
+
+      for (const id of ['old-paused', 'new-paused']) {
+        const record = JSON.parse(
+          await readFile(join(repo, 'content', 'announcements', `${id}.json`), 'utf8'),
+        );
+        expect(record.status).toBe('paused');
+      }
+    });
+  });
+
+  it('keeps the setting when a publish writes the revision counter', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      await run('retention', '--max', '4');
+      await announce(run, 'thing', 1);
+      await run('publish', '--no-push', '--accept-warnings');
+
+      const state = JSON.parse(await readFile(join(repo, 'content', 'state.json'), 'utf8'));
+      expect(state.maxRetained).toBe(4);
+      expect(state.revision).toBeGreaterThan(0);
+
+      expect((await run('retention')).out).toContain('Maximum retained announcements: 4');
+    });
+  });
+
+  it('still signs, and still verifies, with a window applied', async () => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+      const keyPath = join(tmpdir(), `ruood-cli-retain-${basename(repo)}.key`);
+
+      try {
+        await run('keygen', '--key', keyPath);
+        await run('retention', '--max', '2');
+
+        for (const [id, day] of [['note-a', 1], ['note-b', 2], ['note-c', 3]] as const) {
+          await announce(run, id, day);
+        }
+
+        const published = await run('publish', '--no-push', '--accept-warnings', '--key', keyPath);
+        expect(published.code).toBe(0);
+        expect(await publishedIds(repo)).toEqual(['note-b', 'note-c']);
+
+        // Signing happens over the manifest the window produced, so what is
+        // signed and what is published cannot differ.
+        const verified = await run('verify');
+        expect(verified.code).toBe(0);
+        expect(verified.out).toContain('production  OK');
+      } finally {
+        await rm(keyPath, { force: true });
+      }
+    });
+  });
+
+  it.each(['0', '-1', '999', 'lots'])('refuses --max %s as misuse', async (value) => {
+    await withRepo(async (repo, run) => {
+      await initialised(repo, run);
+
+      const result = await run('retention', '--max', value);
+      expect(result.code).toBe(2);
+      expect(result.err).toContain('whole number');
+
+      // And nothing was written: a refused setting is not a setting.
+      expect((await run('retention')).out).toContain('Maximum retained announcements: 20');
+    });
+  });
+});

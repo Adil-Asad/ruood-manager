@@ -38,10 +38,15 @@ import {
   CONTENT_DIR,
   MEDIA_DIR,
   RETIRED_IDS_FILE,
+  STATE_FILE,
   idFromRecordFile,
   mediaFile,
   mediaOf,
+  normaliseRetentionLimit,
   recordFile,
+  isRetentionLimit,
+  RETENTION_MAX,
+  RETENTION_MIN,
 } from '@ruood/announcement-authoring';
 import {
   canonicalJson,
@@ -65,8 +70,29 @@ export interface ContentSnapshot {
   retiredIds: string[];
   /** The stored original for each id, if there is one. */
   media: Record<string, { path: string; sha: string; extension: string }>;
+  /** The repository's own settings. See `RepositorySettings`. */
+  settings: RepositorySettings;
   /** Blob shas by path, so an unchanged file is never fetched twice. */
   shas: Record<string, string>;
+}
+
+/**
+ * `content/state.json`, as the app needs it.
+ *
+ * Two values for two jobs. `maxRetained` is the setting the Settings screen
+ * shows and writes. `stored` is the file exactly as it was read, and it is
+ * there so that writing the setting cannot destroy anything else in it — the
+ * revision counter above all, which the build increments and which going
+ * backwards would make every published manifest look older than it is.
+ *
+ * `stored` is `null` when the file exists and could not be read. The app stays
+ * usable — a settings file is not a reason to stop authoring announcements —
+ * and `saveSettings` refuses, because merging onto a guess is exactly how the
+ * counter would be lost.
+ */
+export interface RepositorySettings {
+  maxRetained: number;
+  stored: Record<string, unknown> | null;
 }
 
 /**
@@ -139,8 +165,45 @@ export async function loadContent(
     failures,
     retiredIds: await loadRetiredIds(client, shas[RETIRED_IDS_FILE], cache),
     media,
+    settings: await loadSettings(client, shas[STATE_FILE], cache, failures),
     shas,
   };
+}
+
+/**
+ * The settings file, which is allowed to be absent and allowed to be broken.
+ *
+ * Absent is an ordinary repository that has never changed a setting. Broken is
+ * reported as a failure like an unreadable record — the list still loads, and
+ * `saveSettings` is what refuses.
+ *
+ * Note that this deliberately does NOT throw the way the retired-id ledger
+ * does. That ledger failing open lets an id be reused on every device that ever
+ * saw it; this one failing open costs a number that can be set again.
+ */
+async function loadSettings(
+  client: GitHubClient,
+  sha: string | undefined,
+  cache: BlobCache,
+  failures: LoadFailure[],
+): Promise<RepositorySettings> {
+  if (!sha) return { maxRetained: normaliseRetentionLimit(undefined), stored: {} };
+
+  try {
+    const text = cache.get(sha) ?? (await client.readBlob(sha));
+    cache.set(sha, text);
+
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('It is not a settings object.');
+    }
+
+    const stored = parsed as Record<string, unknown>;
+    return { maxRetained: normaliseRetentionLimit(stored.maxRetained), stored };
+  } catch (error) {
+    failures.push({ path: STATE_FILE, error: (error as Error).message });
+    return { maxRetained: normaliseRetentionLimit(undefined), stored: null };
+  }
 }
 
 async function loadRetiredIds(
@@ -284,5 +347,60 @@ export async function deleteRecord(
   return result.sha;
 }
 
+/**
+ * Writes the repository's settings, as one commit.
+ *
+ * ## It merges rather than replaces
+ *
+ * `content/state.json` also holds the revision counter, which the publishing
+ * build increments and which nothing else may touch. Writing the settings
+ * object whole would reset it to whatever this app happened to know about, and
+ * a manifest whose revision went backwards is one that reads as older than the
+ * file it replaced. So the write is the file as it was read, plus the change.
+ *
+ * ## It refuses when the file could not be read
+ *
+ * `stored: null` means the file is there and unreadable. Overwriting it would
+ * be inventing a revision counter. The administrator is told; nothing is lost.
+ */
+export async function saveSettings(
+  client: GitHubClient,
+  snapshot: ContentSnapshot,
+  changes: { maxRetained: number },
+  message: string,
+): Promise<string> {
+  const stored = snapshot.settings.stored;
+
+  if (stored === null) {
+    throw new GitHubError(
+      200,
+      `${STATE_FILE} could not be read, so writing it would discard what it holds.`,
+    );
+  }
+
+  if (!isRetentionLimit(changes.maxRetained)) {
+    // The form checks first; this is the floor under a bad call site, and it
+    // refuses rather than clamping so nothing is written that nobody chose.
+    throw new GitHubError(
+      200,
+      `A retention limit must be a whole number between ${RETENTION_MIN} and ${RETENTION_MAX}.`,
+    );
+  }
+
+  const result = await client.commit({
+    message,
+    files: [
+      {
+        path: STATE_FILE,
+        kind: 'text',
+        content: canonicalJson({ ...stored, maxRetained: changes.maxRetained }),
+      },
+    ],
+    parent: snapshot.commit,
+  });
+
+  return result.sha;
+}
+
 /** Where the app looks for things, re-exported so screens need one import. */
-export { ANNOUNCEMENTS_DIR, MEDIA_DIR, RETIRED_IDS_FILE, recordFile };
+export { ANNOUNCEMENTS_DIR, MEDIA_DIR, RETIRED_IDS_FILE, STATE_FILE, recordFile };

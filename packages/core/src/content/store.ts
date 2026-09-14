@@ -20,6 +20,7 @@ import {
   type AuthoredAnnouncement,
   type IdRegistry,
 } from '@ruood/announcement-schema';
+import { normaliseRetentionLimit } from '@ruood/announcement-authoring';
 
 import { recordPath, type RepoPaths } from '../paths';
 
@@ -40,21 +41,27 @@ export interface ContentSnapshot {
   failures: LoadFailure[];
   retiredIds: string[];
   revision: number;
+  /** How many records this repository publishes. See `retention.ts`. */
+  maxRetained: number;
 }
 
-/** The counter that becomes `manifest.revision`. */
-interface RepoState {
+/** What `content/state.json` holds: the revision counter, and the settings. */
+export interface RepoState {
   revision: number;
+  /** The retention limit, normalised. Absent from the file means the default. */
+  maxRetained: number;
 }
 
 export async function loadContent(paths: RepoPaths): Promise<ContentSnapshot> {
   const [records, failures] = await loadRecords(paths);
+  const state = await loadState(paths);
 
   return {
     records,
     failures,
     retiredIds: await loadRetiredIds(paths),
-    revision: (await loadState(paths)).revision,
+    revision: state.revision,
+    maxRetained: state.maxRetained,
   };
 }
 
@@ -140,19 +147,58 @@ export async function retireId(paths: RepoPaths, id: string): Promise<void> {
 }
 
 export async function loadState(paths: RepoPaths): Promise<RepoState> {
-  if (!existsSync(paths.state)) return { revision: 0 };
-  try {
-    const parsed = JSON.parse(await readFile(paths.state, 'utf8')) as Partial<RepoState>;
-    const revision = typeof parsed.revision === 'number' ? parsed.revision : 0;
-    return { revision: Number.isInteger(revision) && revision >= 0 ? revision : 0 };
-  } catch {
-    return { revision: 0 };
-  }
+  const raw = await readRawState(paths);
+
+  const revision = typeof raw.revision === 'number' ? raw.revision : 0;
+
+  return {
+    revision: Number.isInteger(revision) && revision >= 0 ? revision : 0,
+    maxRetained: normaliseRetentionLimit(raw.maxRetained),
+  };
 }
 
-export async function saveState(paths: RepoPaths, state: RepoState): Promise<void> {
+/**
+ * Writes the fields it is given and PRESERVES the rest.
+ *
+ * It used to take a whole `RepoState` and write exactly that, which was fine
+ * while the file held one number. It does not hold one number any more: every
+ * build ends with `saveState(paths, { revision })`, and writing that object
+ * whole would erase the retention limit on the first publish after it was set
+ * — silently, and in the direction that publishes more rather than less.
+ *
+ * Merging onto the parsed file rather than onto `loadState` is deliberate too:
+ * a field a future version of this tool adds survives being written by an older
+ * one, and a value `loadState` normalised away is not written back as though
+ * somebody had chosen it.
+ */
+export async function saveState(paths: RepoPaths, changes: Partial<RepoState>): Promise<void> {
+  const raw = await readRawState(paths);
+
   await mkdir(paths.content, { recursive: true });
-  await writeFile(paths.state, canonicalJson(state), 'utf8');
+  await writeFile(paths.state, canonicalJson({ ...raw, ...changes }), 'utf8');
+}
+
+/**
+ * The state file as it is on disk, or `{}`.
+ *
+ * Unreadable reads as empty on purpose, and it is a different judgement from
+ * `retired-ids.json` above: that ledger failing open would let an id be reused
+ * on every device that ever saw it, while this one failing open costs a
+ * revision number and a setting that can be set again. Refusing to build over
+ * it would take publishing down for something that has no bearing on whether
+ * any announcement is correct.
+ */
+async function readRawState(paths: RepoPaths): Promise<Record<string, unknown>> {
+  if (!existsSync(paths.state)) return {};
+
+  try {
+    const parsed = JSON.parse(await readFile(paths.state, 'utf8')) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 /**
