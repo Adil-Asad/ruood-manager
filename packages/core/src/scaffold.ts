@@ -75,11 +75,27 @@ export const DEFAULT_MANAGER_REPOSITORY = 'Adil-Asad/ruood-manager';
  * Nothing on a device says so; the manifest simply stops changing, and every
  * install goes on showing the last file that published.
  *
- * The lesson is the pin's, not the validator's: a schema the app can author and
- * the pinned toolchain cannot read is a broken publisher, so the two are
- * upgraded together — and this constant is half of that.
+ * `v1.0.3` rather than `v1.0.2` because v1.0.2 predates the retention limit
+ * entirely, and the failure was worse than the last one because nothing failed
+ * at all. The Settings screen writes `maxRetained` into `content/state.json`;
+ * v1.0.2 has no `applyRetention`, so it published every eligible record and
+ * reported success — and its `saveState` still wrote the whole state object, so
+ * the `saveState(paths, { revision })` that ends every publish ERASED the limit
+ * on the very next run. An administrator who set "announcements people see" to
+ * three watched the file go on carrying twelve, found the setting blank when
+ * they went back to check, and had no failed build, no error and no diff to
+ * read anywhere.
+ *
+ * The lesson is the pin's, not the validator's, and it is now the pin's twice:
+ * anything the app can author OR configure that the pinned toolchain cannot
+ * read is a broken publisher, so the two are upgraded together — and this
+ * constant is half of that. The other half is the `ref:` in an existing
+ * repository's `.github/workflows/publish.yml`, which this constant does not
+ * reach: scaffolding writes that file once, and the Manager's own credential
+ * deliberately cannot edit a workflow. Moving this forward without also moving
+ * the pin in every live announcements repository changes nothing for anybody.
  */
-export const DEFAULT_MANAGER_REF = 'v1.0.2';
+export const DEFAULT_MANAGER_REF = 'v1.0.3';
 
 export interface ScaffoldOptions {
   /** `owner/repo` of the Manager repository. */
