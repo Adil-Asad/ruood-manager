@@ -103,6 +103,27 @@ the announcements repository moving `ref:` to it**, in that order. The failure
 is loud in Actions and silent everywhere else, so it is worth checking the last
 run there whenever an announcement "does not arrive".
 
+**A SETTING the pinned toolchain does not know is the same rule, and it fails
+without a red run anywhere.** `v1.0.2` predates `maxRetained` entirely. An
+administrator set "announcements people see" to three; `packages/github` wrote
+it into `content/state.json`; the pinned build had no `applyRetention`, so it
+published every eligible record and *reported success* — and its `saveState`
+wrote the state object whole, so the `saveState(paths, { revision })` that ends
+every publish erased the setting on the very next one. Observed on
+`Adil-Asad/ruood-announcements`: the limit was set three times over two days,
+`dist/announcements.json` went on carrying thirteen records, and the Actions
+history is entirely green. The previous failure at least stopped publishing;
+this one publishes the wrong file.
+
+`DEFAULT_MANAGER_REF` is **half** the upgrade and the easy half. It is a string:
+moving it changes what `announce init` scaffolds and reaches no existing
+repository, and it can be moved to a tag that was never cut without anything
+noticing. Both halves have tests now — `publish-workflow.test.ts` resolves
+`DEFAULT_MANAGER_REF` against this repository's own tags, so the constant cannot
+name a release that does not exist; and repointing a live repository is still a
+commit somebody has to make there, because the Manager's credential deliberately
+cannot write `.github/workflows/`.
+
 ### What was removed, and what replaced it
 
 | Removed | Replaced by |

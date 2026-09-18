@@ -18,6 +18,8 @@
  *   - the key is read from the environment and never written to a file.
  */
 
+import { execFileSync } from 'node:child_process';
+
 import { load } from 'js-yaml';
 import { DEFAULT_MANAGER_REF, DEFAULT_MANAGER_REPOSITORY } from '../scaffold';
 
@@ -206,5 +208,67 @@ describe('the scaffolded defaults', () => {
 
     expect(yaml).toContain(`ref: ${DEFAULT_MANAGER_REF}`);
     expect(yaml).not.toMatch(/ref: main$/m);
+  });
+});
+
+/**
+ * The pinned ref has to be a ref that EXISTS.
+ *
+ * `DEFAULT_MANAGER_REF` and the tag it names are two halves of one release, and
+ * only the first of them is code — so moving the constant is the easy half, and
+ * it can be done, committed and shipped while the tag it points at has never
+ * been cut. Nothing in this repository notices: the constant is a string, the
+ * workflow template interpolates it, and every assertion above still passes.
+ *
+ * What happens instead is that `actions/checkout` fails in the ANNOUNCEMENTS
+ * repository, on a publish, with `Reference is not a tree` — and the publish
+ * that fails is somebody else's, in a repository this one cannot see.
+ *
+ * It has already happened once. `DEFAULT_MANAGER_REF` was moved to `v1.0.3` so
+ * that new repositories would scaffold against a toolchain that understands the
+ * retention limit, and the tag was never created. The live announcements
+ * repository was still pinned at `v1.0.2` and went on publishing every record
+ * while the Settings screen said three; repointing it — the actual fix — would
+ * have failed at checkout.
+ *
+ * So: the constant may only name a tag this repository actually has. Cutting
+ * the release is what makes the test pass, and there is no way to satisfy it by
+ * editing a string.
+ */
+describe('the ref the default names', () => {
+  /** This repository, or `null` when the tests are not run from a checkout. */
+  function git(args: string[]): string | null {
+    try {
+      return execFileSync('git', args, {
+        cwd: __dirname,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    } catch {
+      return null;
+    }
+  }
+
+  const insideCheckout = git(['rev-parse', '--is-inside-work-tree']) === 'true';
+
+  it('exists as a tag in this repository', () => {
+    if (!insideCheckout) {
+      // A packaged copy with no `.git`. There is nothing to check and nothing
+      // to be wrong about, so this is a skip rather than a pass by accident.
+      console.warn('publish-workflow: not a git checkout, tag existence unchecked');
+      return;
+    }
+
+    const resolved = git(['rev-parse', '--verify', `refs/tags/${DEFAULT_MANAGER_REF}`]);
+
+    expect(resolved).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it('is a tag rather than a branch, so what a publish signs cannot move', () => {
+    if (!insideCheckout) return;
+
+    // A branch head with the same name would resolve above and still be a
+    // moving target, which is the arrangement the whole file exists to prevent.
+    expect(git(['rev-parse', '--verify', `refs/heads/${DEFAULT_MANAGER_REF}`])).toBeNull();
   });
 });
