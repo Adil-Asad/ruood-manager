@@ -330,16 +330,18 @@ describe('the ref the default names', () => {
     const listed = git(['ls-remote', '--tags', 'origin', `refs/tags/${DEFAULT_MANAGER_REF}`]);
     if (listed === null || listed === '') return; // covered by the test above
 
-    // An annotated tag lists both the tag object and, as `^{}`, the commit it
-    // points at. The commit is what `actions/checkout` ends up with.
-    const dereferenced = listed
-      .split('\n')
-      .find((line) => line.endsWith('^{}'))
-      ?.split(/\s+/)[0];
+    // Asked for one exact ref, `ls-remote` answers with that ref alone and does
+    // NOT peel it — so an annotated tag reports the sha of the tag OBJECT,
+    // while `rev-parse <tag>^{commit}` reports the commit underneath it. Both
+    // are "this tag" and neither is wrong, so both are accepted; what is being
+    // refused is the remote naming something this repository does not have.
+    const remote = listed.split(/\s+/)[0];
 
-    const remoteCommit = dereferenced ?? listed.split(/\s+/)[0];
-    const localCommit = git(['rev-parse', `${DEFAULT_MANAGER_REF}^{commit}`]);
+    const local = [
+      git([`rev-parse`, DEFAULT_MANAGER_REF]),
+      git([`rev-parse`, `${DEFAULT_MANAGER_REF}^{commit}`]),
+    ];
 
-    expect(remoteCommit).toBe(localCommit);
+    expect(local).toContain(remote);
   });
 });
