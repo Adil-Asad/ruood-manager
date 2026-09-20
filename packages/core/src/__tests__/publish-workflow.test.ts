@@ -271,4 +271,75 @@ describe('the ref the default names', () => {
     // moving target, which is the arrangement the whole file exists to prevent.
     expect(git(['rev-parse', '--verify', `refs/heads/${DEFAULT_MANAGER_REF}`])).toBeNull();
   });
+
+  /**
+   * A tag that exists ONLY on this machine is not a release.
+   *
+   * The assertion above passes the moment somebody types `git tag v1.0.3`, and
+   * a local tag is invisible to everyone. `actions/checkout` resolves the ref
+   * against the REMOTE and nowhere else, so an unpushed tag fails there with
+   * `Reference is not a tree` — in the announcements repository, on somebody
+   * else's publish, in a run this repository never sees.
+   *
+   * That is not the hypothetical the paragraph above took it for. It is what
+   * actually happened: `v1.0.3` was created here, `DEFAULT_MANAGER_REF` was
+   * moved to it, this file's local-tag assertion went green, and the tag was
+   * never pushed. The live `publish.yml` therefore stayed on `v1.0.2` — a
+   * toolchain with no `applyRetention` at all — and went on publishing every
+   * record while the phone's Settings screen said three, with a completely
+   * green Actions history. Ten announcements reached RUOOD Lab.
+   *
+   * So the check is against `origin`, which is the only place the answer lives.
+   */
+  it('is PUSHED, because a checkout resolves it on the remote and not here', () => {
+    if (!insideCheckout) return;
+
+    const remotes = git(['remote']);
+    if (!remotes) {
+      console.warn('publish-workflow: no git remote, tag publication unchecked');
+      return;
+    }
+
+    const listed = git(['ls-remote', '--tags', 'origin', `refs/tags/${DEFAULT_MANAGER_REF}`]);
+
+    if (listed === null) {
+      // Offline, or the remote refused. Unknowable is not the same as wrong,
+      // and a suite that fails on an aeroplane is a suite people stop running.
+      console.warn('publish-workflow: remote unreachable, tag publication unchecked');
+      return;
+    }
+
+    // `ls-remote` answers with an empty string for a ref the remote does not
+    // have, which is the exact shape of this failure.
+    expect(listed).not.toBe('');
+    expect(listed).toContain(`refs/tags/${DEFAULT_MANAGER_REF}`);
+  });
+
+  /**
+   * And it must be the same commit here and there.
+   *
+   * `git tag -f` after a push leaves two different objects wearing one name:
+   * the toolchain that was tested locally, and the different one every publish
+   * actually runs. The workflow pins a tag precisely so that what it signs
+   * cannot move, and a tag that means two things has given that up quietly.
+   */
+  it('names the same commit here and on the remote', () => {
+    if (!insideCheckout) return;
+    if (!git(['remote'])) return;
+
+    const listed = git(['ls-remote', '--tags', 'origin', `refs/tags/${DEFAULT_MANAGER_REF}`]);
+    if (listed === null || listed === '') return; // covered by the test above
+
+    // An annotated tag lists both the tag object and, as `^{}`, the commit it
+    // points at. The commit is what `actions/checkout` ends up with.
+    const dereferenced = listed
+      .split('\n')
+      .find((line) => line.endsWith('^{}'))
+      ?.split(/\s+/)[0];
+
+    const remoteCommit = dereferenced ?? listed.split(/\s+/)[0];
+    const localCommit = git(['rev-parse', `${DEFAULT_MANAGER_REF}^{commit}`]);
+
+    expect(remoteCommit).toBe(localCommit);
+  });
 });
