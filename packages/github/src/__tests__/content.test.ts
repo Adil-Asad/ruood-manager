@@ -22,6 +22,7 @@ import { DEFAULT_MAX_RETAINED } from '@ruood/announcement-authoring';
 import { createGitHubClient, GitHubError } from '../repository';
 import {
   deleteRecord,
+  deleteRecords,
   emptyCache,
   idRegistryOf,
   loadContent,
@@ -393,6 +394,124 @@ describe('deleting', () => {
       .find((content) => content.includes('alpha'))!;
 
     expect(JSON.parse(ledger)).toEqual(['alpha', 'mike', 'zulu']);
+  });
+
+  it('removes several, with their images, in ONE commit', async () => {
+    // The whole reason the batch exists. Five deletions one at a time is five
+    // commits and therefore five publishing runs, four of which publish a
+    // manifest nobody asked anyone to see.
+    const { http, client } = clientFor({
+      files: {
+        'content/announcements/alpha.json': canonicalJson(record({ id: 'alpha' })),
+        'content/announcements/bravo.json': canonicalJson(record({ id: 'bravo' })),
+        'content/announcements/charlie.json': canonicalJson(record({ id: 'charlie' })),
+        'content/media/bravo.gif': 'bytes',
+        'content/retired-ids.json': canonicalJson([]),
+      },
+    });
+    const snapshot = await loadContent(client);
+
+    await deleteRecords(client, snapshot, ['alpha', 'bravo'], 'Delete 2 announcements');
+
+    const tree = treeOf(http);
+    expect(tree['content/announcements/alpha.json']).toBeNull();
+    expect(tree['content/announcements/bravo.json']).toBeNull();
+    // An original goes in the same commit as the record that referenced it.
+    expect(tree['content/media/bravo.gif']).toBeNull();
+
+    // One ref update, so the repository is never observed mid-deletion.
+    expect(http.calls.filter((call) => call.method === 'PATCH')).toHaveLength(1);
+  });
+
+  it('leaves the announcements that were not chosen alone', async () => {
+    const { http, client } = clientFor({
+      files: {
+        'content/announcements/alpha.json': canonicalJson(record({ id: 'alpha' })),
+        'content/announcements/bravo.json': canonicalJson(record({ id: 'bravo' })),
+        'content/announcements/charlie.json': canonicalJson(record({ id: 'charlie' })),
+        'content/media/charlie.gif': 'bytes',
+      },
+    });
+    const snapshot = await loadContent(client);
+
+    await deleteRecords(client, snapshot, ['alpha', 'bravo'], 'Delete 2 announcements');
+
+    const tree = treeOf(http);
+    // `base_tree` carries everything not named, so an untouched record is
+    // simply absent from the entries — never a null, which would delete it.
+    expect(tree).not.toHaveProperty('content/announcements/charlie.json');
+    expect(tree).not.toHaveProperty('content/media/charlie.gif');
+  });
+
+  it('retires every id it removed, in one ledger write', async () => {
+    const { http, client } = clientFor({
+      files: { 'content/retired-ids.json': canonicalJson(['zulu']) },
+    });
+    const snapshot = await loadContent(client);
+
+    await deleteRecords(client, snapshot, ['mike', 'alpha'], 'Delete 2 announcements');
+
+    const ledgers = http.calls
+      .filter((call) => call.url.endsWith('/git/blobs'))
+      .map((call) => (call.body as { content: string }).content)
+      .filter((content) => content.includes('zulu'));
+
+    expect(ledgers).toHaveLength(1);
+    expect(JSON.parse(ledgers[0]!)).toEqual(['alpha', 'mike', 'zulu']);
+  });
+
+  it('is not a commit when nothing was chosen', async () => {
+    // An empty commit in the history reads as a deletion that did something.
+    const { http, client } = clientFor({ files: {} });
+    const snapshot = await loadContent(client);
+
+    await expect(deleteRecords(client, snapshot, [], 'Delete nothing')).resolves.toBeNull();
+    expect(http.calls.filter((call) => call.method === 'PATCH')).toHaveLength(0);
+  });
+
+  it('does not write one path twice when an id is named twice', async () => {
+    const { http, client } = clientFor({
+      files: { 'content/announcements/alpha.json': canonicalJson(record({ id: 'alpha' })) },
+    });
+    const snapshot = await loadContent(client);
+
+    await deleteRecords(client, snapshot, ['alpha', 'alpha'], 'Delete');
+
+    const entries = (
+      http.calls.find((call) => call.url.endsWith('/git/trees'))!.body as {
+        tree: { path: string }[];
+      }
+    ).tree.filter((entry) => entry.path === 'content/announcements/alpha.json');
+
+    expect(entries).toHaveLength(1);
+  });
+
+  it('deletes one announcement exactly as the single delete always did', async () => {
+    // The single delete is now a call of the batch. This is the regression
+    // that says the two cannot come to disagree about what shares a commit.
+    const files = {
+      'content/announcements/reports-center.json': canonicalJson(record()),
+      'content/media/reports-center.gif': 'bytes',
+      'content/retired-ids.json': canonicalJson(['older']),
+    };
+
+    const single = clientFor({ files: { ...files } });
+    await deleteRecord(
+      single.client,
+      await loadContent(single.client),
+      'reports-center',
+      'Delete Reports Center',
+    );
+
+    const batch = clientFor({ files: { ...files } });
+    await deleteRecords(
+      batch.client,
+      await loadContent(batch.client),
+      ['reports-center'],
+      'Delete Reports Center',
+    );
+
+    expect(treeOf(single.http)).toEqual(treeOf(batch.http));
   });
 
   it('does not grow the ledger when an id is already retired', async () => {

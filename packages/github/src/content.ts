@@ -320,12 +320,79 @@ export async function saveRecord(
 }
 
 /**
+ * Deletes one or more records and retires their ids, in ONE commit.
+ *
+ * ## Why the batch is the primitive, and the single delete is the special case
+ *
+ * A record's removal and its ledger entry must land together. An id freed for
+ * reuse would inherit the previous announcement's impression state on every
+ * device for the sixty-day retention window — so a repository observed between
+ * the removal and the ledger entry is a repository in exactly the state the
+ * ledger exists to prevent.
+ *
+ * Deleting several is the same rule, and looping the single delete would break
+ * it in two separate ways rather than one:
+ *
+ *   - **Every intermediate commit is a state somebody can observe**, and the
+ *     publishing workflow is triggered by each of them. Removing five
+ *     announcements one at a time is five builds, four of which publish a
+ *     manifest the administrator never asked anyone to see.
+ *   - **The second write would be REFUSED.** A commit is built on a parent, and
+ *     `snapshot.commit` is the one the caller read. After the first deletion
+ *     that parent is stale, so the second is a non-fast-forward and comes back
+ *     as `ConcurrentUpdate` — the mechanism that protects two administrators
+ *     from overwriting each other, firing on a single administrator deleting
+ *     two things. A caller could re-read between each, but that is N round
+ *     trips to do what the Git Data API does in one tree.
+ *
+ * So the ids are collected, their originals with them, the ledger is written
+ * once, and it is a single commit with a single message — which is also what
+ * makes `git revert` undo the whole operation the way the administrator
+ * performed it.
+ *
+ * Empty, or entirely ids the snapshot does not hold, is not an error and is not
+ * a commit: there is nothing to record, and an empty commit in the history
+ * reads as a deletion that did something.
+ */
+export async function deleteRecords(
+  client: GitHubClient,
+  snapshot: ContentSnapshot,
+  ids: readonly string[],
+  message: string,
+): Promise<string | null> {
+  // De-duplicated before anything is counted. A list naming the same id twice
+  // would otherwise produce two `delete` entries for one path, which the tree
+  // builder has no reason to tolerate.
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return null;
+
+  const files: FileWrite[] = [];
+
+  for (const id of unique) {
+    files.push({ path: recordFile(id), kind: 'delete' });
+
+    // The original goes in the same commit as the record that referenced it,
+    // exactly as it arrived in the same commit. An original left behind is a
+    // picture the publishing build would attach to nothing.
+    const media = snapshot.media[id];
+    if (media) files.push({ path: media.path, kind: 'delete' });
+  }
+
+  // Sorted and de-duplicated, so the ledger is stable and a re-deletion of an
+  // already-retired id does not grow it.
+  const retired = [...new Set([...snapshot.retiredIds, ...unique])].sort();
+  files.push({ path: RETIRED_IDS_FILE, kind: 'text', content: canonicalJson(retired) });
+
+  const result = await client.commit({ message, files, parent: snapshot.commit });
+  return result.sha;
+}
+
+/**
  * Deletes a record and retires its id, in one commit.
  *
- * The two must land together. An id freed for reuse would inherit the previous
- * announcement's impression state on every device for the sixty-day retention
- * window — so a repository observed between the removal and the ledger entry is
- * a repository in exactly the state the ledger exists to prevent.
+ * One call of `deleteRecords`, rather than a second implementation of it. The
+ * rule about what shares a commit with a deletion is written once, so deleting
+ * one announcement and deleting ten cannot come to disagree about it.
  */
 export async function deleteRecord(
   client: GitHubClient,
@@ -333,18 +400,13 @@ export async function deleteRecord(
   id: string,
   message: string,
 ): Promise<string> {
-  const files: FileWrite[] = [{ path: recordFile(id), kind: 'delete' }];
+  const sha = await deleteRecords(client, snapshot, [id], message);
 
-  const media = snapshot.media[id];
-  if (media) files.push({ path: media.path, kind: 'delete' });
-
-  // Sorted and de-duplicated, so the ledger is stable and a re-deletion of an
-  // already-retired id does not grow it.
-  const retired = [...new Set([...snapshot.retiredIds, id])].sort();
-  files.push({ path: RETIRED_IDS_FILE, kind: 'text', content: canonicalJson(retired) });
-
-  const result = await client.commit({ message, files, parent: snapshot.commit });
-  return result.sha;
+  // Never null: one id is never an empty list. Asserted rather than assumed,
+  // because the caller's signature promises a sha and returning `null` as one
+  // would surface later as a successful delete that reported nothing.
+  if (sha === null) throw new GitHubError(500, 'The deletion produced no commit.');
+  return sha;
 }
 
 /**

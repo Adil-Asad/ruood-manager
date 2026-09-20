@@ -17,6 +17,23 @@
  * The mapping is in one place, `matches` below, so the two axes cannot get
  * confused anywhere else.
  *
+ * ## Selecting several, and deleting them together
+ *
+ * Deleting announcements one at a time is one commit each, and therefore one
+ * publishing run each — four of which, clearing out five, publish a manifest
+ * nobody asked anyone to see. So the list has a select mode: tick several, and
+ * `deleteRecords` removes them and retires every id in a SINGLE commit.
+ *
+ * The mode is a mode rather than a permanent row of checkboxes because reading
+ * the list is what this screen is mostly for, and a checkbox beside every row
+ * is a screen that asks a question nobody was asking. Tapping a card navigates
+ * exactly as it did; only in select mode does it tick instead.
+ *
+ * What is ticked and what a delete acts on are not quite the same thing, and
+ * `src/selection.ts` is where that is settled: the filters and the search box
+ * are still live in select mode, and a selection that outlived its filter
+ * would delete announcements that are not on the screen.
+ *
  * ## Why the thumbnail is not fetched here
  *
  * A list of twenty announcements would be twenty authenticated image requests
@@ -26,7 +43,7 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -36,12 +53,24 @@ import {
   type LifecycleStatus,
 } from '@ruood/announcement-schema';
 
+import { deleteRecords } from '@ruood/announcement-github';
+
 import { sortedRecords, useManager } from '../../src/manager';
 import { announcementLabel, deliveryOf, statusOf } from '../../src/language';
 import {
+  chosenFrom,
+  deleteConfirmTitle,
+  selectAllState,
+  selectionLabel,
+  toggle,
+  toggleAll,
+} from '../../src/selection';
+import {
   Badge,
+  Body,
   Button,
   Callout,
+  Confirm,
   Empty,
   Input,
   Loading,
@@ -102,11 +131,17 @@ function lifecycleOf(record: AuthoredAnnouncement, now: number): LifecycleStatus
 }
 
 export default function AnnouncementsScreen(): React.JSX.Element {
-  const { content, phase, problem, refresh } = useManager();
+  const { api, content, phase, problem, refresh, run, notify } = useManager();
+  const palette = usePalette();
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
   const [refreshing, setRefreshing] = useState(false);
+
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<readonly string[]>([]);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const onRefresh = useCallback(async (): Promise<void> => {
     setRefreshing(true);
@@ -132,6 +167,71 @@ export default function AnnouncementsScreen(): React.JSX.Element {
       );
   }, [content, query, filter]);
 
+  const visibleIds = useMemo(() => visible.map((entry) => entry.record.id), [visible]);
+
+  // What a delete would act on. Never more than what is on the screen — see
+  // `src/selection.ts` for why a selection is not allowed to outlive its filter.
+  const chosen = useMemo(() => chosenFrom(selected, visibleIds), [selected, visibleIds]);
+  const allState = selectAllState(selected, visibleIds);
+
+  const leaveSelectMode = useCallback((): void => {
+    setSelecting(false);
+    setSelected([]);
+    setConfirming(false);
+  }, []);
+
+  /**
+   * Leaving the screen ends select mode.
+   *
+   * A tick is about the list in front of somebody, and coming back to a
+   * half-made selection from an announcement they went off to read is a Delete
+   * button armed with a decision they have stopped thinking about. Cheap to
+   * remake, and the alternative is the expensive kind of surprise.
+   */
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        leaveSelectMode();
+      },
+      [leaveSelectMode],
+    ),
+  );
+
+  const removeChosen = useCallback(async (): Promise<void> => {
+    // The guard is not decoration: the confirm button is disabled at zero, and
+    // this is what makes that true rather than merely displayed.
+    if (!api || chosen.length === 0) return;
+
+    setBusy(true);
+    setConfirming(false);
+
+    // ONE commit, one publishing run, one entry in the history — and one
+    // `git revert` that undoes exactly what the administrator did. Looping the
+    // single delete would also be refused on the second call, since each write
+    // is built on the snapshot this one read.
+    //
+    // One announcement is named, exactly as the detail screen's Delete names
+    // it: a `git log` a year later should not be able to tell which screen the
+    // deletion was made from. Several are counted, because a commit subject
+    // listing twelve titles is one nobody reads.
+    const only = chosen.length === 1 ? visible.find((entry) => entry.record.id === chosen[0]) : null;
+    const label = only
+      ? `Delete ${announcementLabel(only.record)}`
+      : `Delete ${chosen.length} announcements`;
+
+    // `deleteRecords` answers `null` only for an empty list, which the guard
+    // above has already excluded — so a `null` here is `run` reporting that the
+    // write failed, and nothing else.
+    const ok = await run((snapshot) => deleteRecords(api, snapshot, chosen, label));
+
+    setBusy(false);
+
+    if (ok !== null) {
+      notify(chosen.length === 1 ? 'Deleted.' : `Deleted ${chosen.length} announcements.`);
+      leaveSelectMode();
+    }
+  }, [api, chosen, visible, run, notify, leaveSelectMode]);
+
   if (phase === 'unreachable') {
     return (
       <Screen onRefresh={() => void onRefresh()} refreshing={refreshing}>
@@ -152,9 +252,72 @@ export default function AnnouncementsScreen(): React.JSX.Element {
   return (
     <Screen onRefresh={() => void onRefresh()} refreshing={refreshing}>
       <View style={{ gap: SPACE.md, paddingVertical: SPACE.md }}>
-        <Button kind="primary" full onPress={() => router.push('/announcements/new')}>
-          New Announcement
-        </Button>
+        {selecting ? (
+          <View style={{ gap: SPACE.sm }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: SPACE.sm,
+              }}
+            >
+              {/* The count is the fact somebody checks before tapping
+                  something irreversible, so it is the text on the row rather
+                  than a subtitle under it. */}
+              <Text style={{ color: palette.text, fontSize: 15, fontWeight: '600' }}>
+                {selectionLabel(chosen.length)}
+              </Text>
+
+              <Pressable
+                onPress={() => setSelected(toggleAll(selected, visibleIds))}
+                disabled={visibleIds.length === 0}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: visibleIds.length === 0 }}
+                style={{ minHeight: TOUCH_TARGET, justifyContent: 'center', paddingHorizontal: SPACE.sm }}
+              >
+                <Text
+                  style={{
+                    color: visibleIds.length === 0 ? palette.textFaint : palette.accent,
+                    fontSize: 15,
+                    fontWeight: '600',
+                  }}
+                >
+                  {allState === 'all' ? 'Deselect All' : 'Select All'}
+                </Text>
+              </Pressable>
+            </View>
+
+            <Button
+              kind="danger"
+              full
+              // Nothing ticked is nothing to delete. Disabled rather than
+              // hidden: a button that vanishes leaves somebody wondering where
+              // the one they were about to press went.
+              disabled={chosen.length === 0 || busy}
+              busy={busy}
+              onPress={() => setConfirming(true)}
+            >
+              {chosen.length === 0 ? 'Delete' : `Delete ${chosen.length}`}
+            </Button>
+
+            <Button full onPress={leaveSelectMode}>
+              Cancel
+            </Button>
+          </View>
+        ) : (
+          <View style={{ gap: SPACE.sm }}>
+            <Button kind="primary" full onPress={() => router.push('/announcements/new')}>
+              New Announcement
+            </Button>
+
+            {content.records.length > 0 ? (
+              <Button full onPress={() => setSelecting(true)}>
+                Select
+              </Button>
+            ) : null}
+          </View>
+        )}
 
         <Input
           value={query}
@@ -189,6 +352,9 @@ export default function AnnouncementsScreen(): React.JSX.Element {
                 key={entry.record.id}
                 record={entry.record}
                 lifecycle={entry.lifecycle}
+                selecting={selecting}
+                selected={selected.includes(entry.record.id)}
+                onToggle={() => setSelected(toggle(selected, entry.record.id))}
                 // A picture chosen on a phone has no `image` object until the
                 // publishing build encodes it, so the ORIGINAL is what says
                 // there is one. Reading only the record would show an
@@ -203,6 +369,28 @@ export default function AnnouncementsScreen(): React.JSX.Element {
 
         <View style={{ height: SPACE.xl }} />
       </View>
+
+      {/* The Manager's one confirmation component, as every other destructive
+          action on this app uses — Cancel first, the destructive button second
+          and never the one a thumb lands on by default. */}
+      <Confirm
+        visible={confirming}
+        title={deleteConfirmTitle(chosen.length)}
+        confirmLabel={chosen.length === 1 ? 'Delete' : `Delete ${chosen.length}`}
+        confirmKind="danger"
+        busy={busy}
+        confirmDisabled={chosen.length === 0}
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => void removeChosen()}
+      >
+        <Body>
+          {chosen.length === 1
+            ? 'This announcement will be removed. Anyone who has not seen it never will.'
+            : `These ${chosen.length} announcements will be removed. Anyone who has not seen ` +
+              'them never will.'}
+        </Body>
+        <Body>This cannot be undone from here.</Body>
+      </Confirm>
     </Screen>
   );
 }
@@ -260,22 +448,39 @@ function AnnouncementCard({
   record,
   lifecycle,
   hasImage,
+  selecting,
+  selected,
+  onToggle,
 }: {
   record: AuthoredAnnouncement;
   lifecycle: LifecycleStatus;
   hasImage: boolean;
+  /** Whether the list is choosing announcements rather than opening them. */
+  selecting: boolean;
+  selected: boolean;
+  onToggle: () => void;
 }): React.JSX.Element {
   const palette = usePalette();
   const delivery = deliveryOf(record.display.surface);
 
   return (
     <Pressable
-      onPress={() => router.push(`/announcements/${encodeURIComponent(record.id)}`)}
-      accessibilityRole="button"
+      // The whole card is the target in select mode, not just the box. A
+      // checkbox on a phone is a small thing to hit repeatedly, and a row that
+      // does nothing when tapped beside it reads as broken.
+      onPress={
+        selecting
+          ? onToggle
+          : () => router.push(`/announcements/${encodeURIComponent(record.id)}`)
+      }
+      accessibilityRole={selecting ? 'checkbox' : 'button'}
+      accessibilityState={selecting ? { checked: selected } : undefined}
       accessibilityLabel={`${announcementLabel(record)}, ${statusOf(lifecycle)}`}
       style={({ pressed }) => ({
         backgroundColor: pressed ? palette.surface2 : palette.surface,
-        borderColor: palette.border,
+        // The ticked state is carried by the border as well as the box, so a
+        // selection is legible while scrolling rather than only on inspection.
+        borderColor: selecting && selected ? palette.accent : palette.border,
         borderWidth: 1,
         borderRadius: RADIUS.lg,
         padding: SPACE.md,
@@ -284,6 +489,16 @@ function AnnouncementCard({
       })}
     >
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: SPACE.md }}>
+        {selecting ? (
+          <View style={{ justifyContent: 'center', minHeight: 44 }}>
+            <MaterialCommunityIcons
+              name={selected ? 'checkbox-marked' : 'checkbox-blank-outline'}
+              size={24}
+              color={selected ? palette.accent : palette.textFaint}
+            />
+          </View>
+        ) : null}
+
         <Thumbnail hasImage={hasImage} />
 
         <View style={{ flex: 1, gap: 4 }}>

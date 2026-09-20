@@ -291,8 +291,8 @@ A full check before calling work done:
 npm run build && npm test && npm run typecheck
 ```
 
-Currently **987 tests across 41 suites** — 317 schema, 224 mobile, 197 core,
-93 authoring, 77 github, 55 cli, 24 client.
+Currently **1029 tests across 43 suites** — 317 schema, 247 mobile, 210 core,
+93 authoring, 83 github, 55 cli, 24 client.
 
 Two of the mobile suites are about the BUILD rather than the app, and both pin
 something that otherwise fails only in the cloud: `metro-resolution.test.ts` (7)
@@ -514,6 +514,37 @@ cut from its middle, in both places at once.
 `bodyLimitFor` follows from it: the taller the frame, the less screen is left
 for words. Those are authoring limits — `BODY_MAX_LENGTH` is still 500 and every
 published record is still valid at 500.
+
+**A picture is drawn WIDTH-LED, and a height ceiling is the same bug wearing a
+different hat.** The 16:9 fix above gave both of RUOOD Lab's surfaces a box of
+the image's own ratio — and kept a ceiling, a fraction of the window, that the
+box was fitted inside. Nothing was cropped or stretched any more and the ratio
+was honoured, so it read as correct. It was not: a box fitted into a ceiling
+shorter than the frame goes height-led, and the only way to keep a ratio while
+losing height is to lose WIDTH. On a 411x869 phone the card gives a picture
+347pt; Portrait came out 292, Tall 243 and Full screen 205 — a column down the
+middle with 142pt of empty card either side. **The taller the administrator's
+choice, the narrower the result**, which is the exact inverse of what choosing
+"Tall" means, and it looks like a rendering glitch rather than a layout rule.
+
+So `imageBoxFor`, `imageMaxHeight` and both max-screen-fractions are gone, and
+`frameBoxFor(image, width)` is the whole of it: full width, height from the
+ratio, no ceiling anywhere in the file. The four come out 347, 434, 521 and 616
+tall at that width. The height a tall frame costs is the SURFACE's to absorb —
+the dialog's card grows to the window and its scroller takes the rest, the inbox
+detail is a screen that already scrolls — because a ceiling cannot shorten a
+picture without narrowing it, and the only safe number of ceilings is none.
+
+`image-frame.test.ts` pins it as a monotonicity rather than four numbers:
+taller frame, taller box, **same width**. Both bugs had a ratio that was
+arguably right, so asserting the ratio is what missed them twice.
+
+The dialog's close X follows from the same change. A Full-screen frame can fill
+the card, so "Dismiss" at the bottom can be below the fold; the X is pinned to
+the card's top-right, OUTSIDE the scroller so scrolling cannot carry it away
+and absolutely positioned so it costs the picture no vertical space. The bottom
+row is untouched and still always drawn — the X is a second way out, never the
+only one, and "nothing here can be inescapable" is unchanged.
 
 ### `action.target` is a closed enum, never a URL
 
@@ -758,6 +789,48 @@ Three things there are load-bearing and each was a real hazard:
 - **A record and its image go in the SAME commit**, and so do a deletion and its
   retired-id ledger entry. A repository observed between those two commits is
   one the build refuses, or one where an id is briefly free for reuse.
+
+### Deleting several is ONE commit, and the batch is the primitive
+
+`deleteRecords(client, snapshot, ids, message)` in `packages/github/src/content.ts`
+removes every chosen record, every original beside them, and writes the
+retired-id ledger once — in a single commit. `deleteRecord` is a call of it, so
+the rule about what shares a commit with a deletion is written once and deleting
+one announcement and deleting ten cannot come to disagree about it.
+
+Looping the single delete is not merely slower; it is **broken in two separate
+ways**, and the second is the one that surprises:
+
+- every intermediate commit is a state somebody can observe, and each one
+  triggers `publish.yml` — clearing out five announcements is five builds, four
+  of which publish a manifest nobody asked anyone to see;
+- **the second write is REFUSED.** A commit is built on a parent, and
+  `snapshot.commit` is the one the caller read. After the first deletion that
+  parent is stale, so the second comes back as `ConcurrentUpdate` — the
+  mechanism that protects two administrators from overwriting each other,
+  firing on one administrator deleting two things.
+
+An empty list is not an error and is not a commit: an empty commit in the
+history reads as a deletion that did something.
+
+### A selection never outlives what is on screen
+
+`packages/mobile/src/selection.ts` is the pure half of the list's select mode,
+and the rule it exists for is one line: **a delete acts on the ticked ids that
+are currently VISIBLE.** The list is filtered and searched, and a selection that
+outlived its filter would let somebody tick three under "All", narrow to
+"Draft", read "1 selected", and delete three.
+
+`chosenFrom` is the only thing the delete is given. The raw selection is
+deliberately not pruned when the filter changes, only intersected on the way
+out, so narrowing and widening again restores the ticks — what can be deleted
+never grows beyond the screen either way. Leaving the screen clears the mode
+entirely (`useFocusEffect`), because coming back to a half-made selection is a
+Delete button armed with a decision somebody stopped thinking about.
+
+Select mode is a MODE rather than a permanent column of checkboxes: reading the
+list is what that screen is mostly for. Tapping a card navigates exactly as it
+did, and only in select mode does it tick instead.
 
 ### The app re-reads after every write, and the blob cache is not an exception
 
@@ -1525,7 +1598,8 @@ whole system exists to prevent.
 | `packages/core/src/images/attach.ts` | Encode, keep exactly one original per id, read bytes back for a preview |
 | `packages/github/src/device-flow.ts` | Signing in with nothing to paste, and why one poll |
 | `packages/github/src/repository.ts` | One commit over HTTP; `base_tree`, and refusing to force |
-| `packages/github/src/content.ts` | The repository as announcements; what shares a commit |
+| `packages/github/src/content.ts` | The repository as announcements; what shares a commit, and why deleting several is one |
+| `packages/mobile/src/selection.ts` | Choosing several, and why a selection may not outlive its filter |
 | `packages/authoring/src/edit.ts` | The closed editable set, and why each exclusion is excluded |
 | `packages/authoring/src/authoring.ts` | The legal state moves, in one table |
 | `packages/authoring/src/repo-paths.ts` | Where a record lives, said once for both transports |
@@ -1564,6 +1638,7 @@ In RUŌOD Lab (`d:\app\modules\announcements/`):
 | `inbox-store.ts` | The one unread derivation both indicators read |
 | `images.ts` | Pure. Which images are worth fetching, and which may be evicted |
 | `image-cache.ts` | Verify before keeping, and never a reason to suppress a record |
+| `image-frame.ts` | The four frames, and why a height ceiling can only be paid for in width |
 
 Two things in `git/repository.ts` are non-obvious and were bugs once:
 
